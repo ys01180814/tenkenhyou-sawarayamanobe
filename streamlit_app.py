@@ -161,6 +161,10 @@ div[data-testid="stRadio"] label p {
     background-color: #FF8C00 !important;
     height: 2.5em !important;
 }
+.save-box {
+    margin-top: -6px;
+    margin-bottom: 8px;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -206,6 +210,7 @@ if "last_report_png" not in st.session_state:
 if "last_report_image" not in st.session_state:
     st.session_state["last_report_image"] = None
 
+# item_data 復元
 if not st.session_state["item_data"]:
     loaded_item_data = saved_data.get("item_data", {})
     restored = {}
@@ -230,7 +235,7 @@ def persist_saved_content():
             persist_item_data[key] = {
                 "status": value.get("status"),
                 "save": True,
-                "image": image_bytes_to_b64(value.get("image")),  # 画像も保存
+                "image": image_bytes_to_b64(value.get("image")),
                 "detail": value.get("detail", ""),
                 "pos": value.get("pos", "")
             }
@@ -242,7 +247,7 @@ def persist_saved_content():
                 "save": True,
                 "defect": row.get("defect", ""),
                 "action": row.get("action", ""),
-                "image": image_bytes_to_b64(row.get("image"))  # 画像も保存
+                "image": image_bytes_to_b64(row.get("image"))
             })
 
     data = {
@@ -439,6 +444,7 @@ with st.container():
         st.rerun()
     st.markdown("</div>", unsafe_allow_html=True)
 
+# 入力内容を都度保存
 persist_saved_content()
 
 # =========================
@@ -519,12 +525,9 @@ def generate_report_png():
                 )
 
             if other_action:
-                d.text((80, curr_y), "対応状況:", fill="black", font=f_text)
-                bbox = d.textbbox((80, curr_y), "対応状況:", font=f_text)
-                curr_y += (bbox[3] - bbox[1]) + 8
                 curr_y = draw_multiline_text(
-                    d, other_action, 100, curr_y, f_text,
-                    fill="black", max_chars=36, line_spacing=8
+                    d, f"対応状況:\n{other_action}", 80, curr_y, f_text,
+                    fill="black", max_chars=38, line_spacing=8
                 )
 
             if other_image:
