@@ -209,7 +209,6 @@ if "last_report_png" not in st.session_state:
 if "last_report_image" not in st.session_state:
     st.session_state["last_report_image"] = None
 
-# item_data 復元
 if not st.session_state["item_data"]:
     loaded_item_data = saved_data.get("item_data", {})
     restored = {}
@@ -432,7 +431,6 @@ with st.container():
         st.rerun()
     st.markdown("</div>", unsafe_allow_html=True)
 
-# 入力内容を都度保存
 persist_saved_content()
 
 # =========================
