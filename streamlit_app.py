@@ -97,20 +97,18 @@ def paste_image_keep_orientation(base_img, image_bytes, x, y, max_w=350, max_h=3
     except Exception:
         return y
 
-def preview_uploaded_image(image_bytes, caption):
+def show_uploaded_image_preview(image_bytes, caption, max_width=260):
     if not image_bytes:
         return
     try:
         img = Image.open(io.BytesIO(image_bytes))
         w, h = img.size
-
-        # 縦画像は縦のまま、横画像は横のまま見せる
-        if h > w:
-            st.image(image_bytes, caption=caption, width=260)
+        if w >= h:
+            st.image(image_bytes, caption=caption, width=max_width)
         else:
-            st.image(image_bytes, caption=caption, use_container_width=True)
+            st.image(image_bytes, caption=caption, width=int(max_width * 0.75))
     except Exception:
-        pass
+        st.image(image_bytes, caption=caption, width=max_width)
 
 def default_item_record(default_status):
     return {
@@ -122,6 +120,7 @@ def default_item_record(default_status):
 
 def default_other_issue_record():
     return {
+        "status": "異常なし",
         "save": False,
         "defect": "",
         "action": "",
@@ -175,10 +174,6 @@ div[data-testid="stRadio"] label p {
     background-color: #FF8C00 !important;
     height: 2.5em !important;
 }
-.save-box {
-    margin-top: -6px;
-    margin-bottom: 8px;
-}
 </style>
 """, unsafe_allow_html=True)
 
@@ -205,6 +200,7 @@ if "other_issue_list" not in st.session_state:
     restored_other = []
     for row in loaded_other:
         restored_other.append({
+            "status": row.get("status", "異常なし"),
             "save": row.get("save", False),
             "defect": row.get("defect", ""),
             "action": row.get("action", ""),
@@ -255,6 +251,7 @@ def persist_saved_content():
     for row in st.session_state["other_issue_list"]:
         if row.get("save"):
             persist_other_list.append({
+                "status": row.get("status", "異常なし"),
                 "save": True,
                 "defect": row.get("defect", ""),
                 "action": row.get("action", ""),
@@ -342,7 +339,7 @@ def render_check_item(label, key, is_voice=False):
             st.session_state["item_data"][key]["image"] = img_file.read()
 
         if st.session_state["item_data"][key].get("image"):
-            preview_uploaded_image(
+            show_uploaded_image_preview(
                 st.session_state["item_data"][key]["image"],
                 f"{label} 添付画像"
             )
@@ -361,6 +358,17 @@ def render_other_issue(index):
     st.markdown("---")
     st.write(f"### ■ その他 設備不備 {index + 1}")
 
+    options = ["異常なし", "異常あり", "要清掃"]
+    status = st.radio(
+        "状態",
+        options,
+        index=options.index(issue.get("status", "異常なし")) if issue.get("status", "異常なし") in options else 0,
+        key=f"other_status_{index}",
+        horizontal=True,
+        label_visibility="collapsed"
+    )
+    st.session_state["other_issue_list"][index]["status"] = status
+
     save_flag = st.checkbox(
         "保存",
         value=issue.get("save", False),
@@ -368,35 +376,39 @@ def render_other_issue(index):
     )
     st.session_state["other_issue_list"][index]["save"] = save_flag
 
-    defect = st.text_area(
-        "不備内容",
-        value=issue.get("defect", ""),
-        key=f"other_defect_{index}",
-        placeholder="設備不備の内容を入力"
-    )
-    st.session_state["other_issue_list"][index]["defect"] = defect
-
-    action = st.text_area(
-        "対応状況",
-        value=issue.get("action", ""),
-        key=f"other_action_{index}",
-        placeholder="対応状況を入力"
-    )
-    st.session_state["other_issue_list"][index]["action"] = action
-
-    img_file = st.file_uploader(
-        "その他 設備不備の写真を添付",
-        type=["png", "jpg", "jpeg"],
-        key=f"other_issue_img_{index}"
-    )
-    if img_file:
-        st.session_state["other_issue_list"][index]["image"] = img_file.read()
-
-    if st.session_state["other_issue_list"][index].get("image"):
-        preview_uploaded_image(
-            st.session_state["other_issue_list"][index]["image"],
-            f"その他 設備不備 {index + 1} 添付画像"
+    if status in ["異常あり", "要清掃"]:
+        defect = st.text_area(
+            "不備内容",
+            value=issue.get("defect", ""),
+            key=f"other_defect_{index}",
+            placeholder="設備不備の内容を入力"
         )
+        st.session_state["other_issue_list"][index]["defect"] = defect
+
+        action = st.text_area(
+            "対応状況",
+            value=issue.get("action", ""),
+            key=f"other_action_{index}",
+            placeholder="対応状況を入力"
+        )
+        st.session_state["other_issue_list"][index]["action"] = action
+
+        img_file = st.file_uploader(
+            "その他 設備不備の写真を添付",
+            type=["png", "jpg", "jpeg"],
+            key=f"other_issue_img_{index}"
+        )
+        if img_file:
+            st.session_state["other_issue_list"][index]["image"] = img_file.read()
+
+        if st.session_state["other_issue_list"][index].get("image"):
+            show_uploaded_image_preview(
+                st.session_state["other_issue_list"][index]["image"],
+                f"その他 設備不備 {index + 1} 添付画像"
+            )
+    else:
+        st.session_state["other_issue_list"][index]["defect"] = issue.get("defect", "")
+        st.session_state["other_issue_list"][index]["action"] = issue.get("action", "")
 
 # =========================
 # 9. 入力セクション
@@ -515,15 +527,17 @@ def generate_report_png():
         curr_y += 30
 
     for issue in st.session_state["other_issue_list"]:
+        other_status = issue.get("status", "異常なし")
         other_defect = issue.get("defect", "").strip()
         other_action = issue.get("action", "").strip()
         other_image = issue.get("image")
 
-        if other_defect or other_action or other_image:
-            d.text((50, curr_y), "■ その他 設備不備", fill="black", font=f_text)
-            d.text((800, curr_y), "[記載あり]", fill="red", font=f_text)
-            curr_y += 42
+        d.text((50, curr_y), "■ その他 設備不備", fill="black", font=f_text)
+        color = "red" if other_status in ["異常あり", "要清掃"] else "green"
+        d.text((800, curr_y), f"[{other_status}]", fill=color, font=f_text)
+        curr_y += 42
 
+        if other_status in ["異常あり", "要清掃"]:
             if other_defect:
                 curr_y = draw_multiline_text(
                     d, f"不備内容: {other_defect}", 80, curr_y, f_text,
@@ -541,8 +555,8 @@ def generate_report_png():
                     report, other_image, 80, curr_y + 5, max_w=350, max_h=350
                 )
 
-            d.line([(50, curr_y), (950, curr_y)], fill="#dddddd")
-            curr_y += 30
+        d.line([(50, curr_y), (950, curr_y)], fill="#dddddd")
+        curr_y += 30
 
     final_height = min(curr_y + 20, h)
     report = report.crop((0, 0, w, final_height))
