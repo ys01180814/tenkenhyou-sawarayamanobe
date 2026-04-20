@@ -102,8 +102,7 @@ def default_item_record(default_status):
         "status": default_status,
         "save": False,
         "image": None,
-        "detail": "",
-        "pos": ""
+        "detail": ""
     }
 
 def default_other_issue_record():
@@ -220,8 +219,7 @@ if not st.session_state["item_data"]:
             "status": v.get("status", default_status),
             "save": v.get("save", False),
             "image": b64_to_image_bytes(v.get("image")),
-            "detail": v.get("detail", ""),
-            "pos": v.get("pos", "")
+            "detail": v.get("detail", "")
         }
     st.session_state["item_data"] = restored
 
@@ -236,8 +234,7 @@ def persist_saved_content():
                 "status": value.get("status"),
                 "save": True,
                 "image": image_bytes_to_b64(value.get("image")),
-                "detail": value.get("detail", ""),
-                "pos": value.get("pos", "")
+                "detail": value.get("detail", "")
             }
 
     persist_other_list = []
@@ -337,15 +334,6 @@ def render_check_item(label, key, is_voice=False):
             placeholder="詳細を入力（音声入力可）"
         )
         st.session_state["item_data"][key]["detail"] = detail
-
-        if not is_voice:
-            pos = st.text_input(
-                f"{label}の位置メモ",
-                value=st.session_state["item_data"][key].get("pos", ""),
-                key=f"p_{key}",
-                placeholder="例：スロット側入口付近"
-            )
-            st.session_state["item_data"][key]["pos"] = pos
 
 def render_other_issue(index):
     issue = st.session_state["other_issue_list"][index]
@@ -486,17 +474,10 @@ def generate_report_png():
 
         if is_err:
             detail_text = v.get("detail", "").strip()
-            pos_text = v.get("pos", "").strip()
 
             if detail_text:
                 curr_y = draw_multiline_text(
                     d, f"詳細: {detail_text}", 80, curr_y, f_text,
-                    fill="black", max_chars=38, line_spacing=8
-                )
-
-            if (label != "お客様の声") and pos_text:
-                curr_y = draw_multiline_text(
-                    d, f"位置: {pos_text}", 80, curr_y, f_text,
                     fill="black", max_chars=38, line_spacing=8
                 )
 
