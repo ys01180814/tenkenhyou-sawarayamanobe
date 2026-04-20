@@ -88,16 +88,29 @@ def paste_image_keep_orientation(base_img, image_bytes, x, y, max_w=350, max_h=3
     try:
         photo = Image.open(io.BytesIO(image_bytes)).convert("RGB")
         original_w, original_h = photo.size
-
         ratio = min(max_w / original_w, max_h / original_h)
         new_w = max(1, int(original_w * ratio))
         new_h = max(1, int(original_h * ratio))
-
         photo = photo.resize((new_w, new_h))
         base_img.paste(photo, (x, y))
         return y + new_h + 25
     except Exception:
         return y
+
+def preview_uploaded_image(image_bytes, caption):
+    if not image_bytes:
+        return
+    try:
+        img = Image.open(io.BytesIO(image_bytes))
+        w, h = img.size
+
+        # 縦画像は縦のまま、横画像は横のまま見せる
+        if h > w:
+            st.image(image_bytes, caption=caption, width=260)
+        else:
+            st.image(image_bytes, caption=caption, use_container_width=True)
+    except Exception:
+        pass
 
 def default_item_record(default_status):
     return {
@@ -328,6 +341,12 @@ def render_check_item(label, key, is_voice=False):
         if img_file:
             st.session_state["item_data"][key]["image"] = img_file.read()
 
+        if st.session_state["item_data"][key].get("image"):
+            preview_uploaded_image(
+                st.session_state["item_data"][key]["image"],
+                f"{label} 添付画像"
+            )
+
         detail = st.text_area(
             "詳細内容",
             value=st.session_state["item_data"][key].get("detail", ""),
@@ -372,6 +391,12 @@ def render_other_issue(index):
     )
     if img_file:
         st.session_state["other_issue_list"][index]["image"] = img_file.read()
+
+    if st.session_state["other_issue_list"][index].get("image"):
+        preview_uploaded_image(
+            st.session_state["other_issue_list"][index]["image"],
+            f"その他 設備不備 {index + 1} 添付画像"
+        )
 
 # =========================
 # 9. 入力セクション
