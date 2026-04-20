@@ -33,6 +33,29 @@ def draw_multiline_text(draw, text, x, y, font, fill="black", max_chars=38, line
 
     return y
 
+# --- 画像貼り付け用（縦横比維持） ---
+def paste_image_keep_orientation(base_img, image_bytes, x, y, max_w=350, max_h=350):
+    """
+    縦画像は縦のまま、横画像は横のまま、正方形は正方形のまま、
+    縦横比を維持して貼り付ける
+    """
+    if not image_bytes:
+        return y
+
+    try:
+        photo = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+        original_w, original_h = photo.size
+
+        ratio = min(max_w / original_w, max_h / original_h)
+        new_w = max(1, int(original_w * ratio))
+        new_h = max(1, int(original_h * ratio))
+
+        photo = photo.resize((new_w, new_h))
+        base_img.paste(photo, (x, y))
+        return y + new_h + 25
+    except Exception:
+        return y
+
 # --- 1. アプリの基本設定とCSS ---
 st.set_page_config(page_title="佐原山之辺店 点検表", layout="centered")
 
@@ -61,6 +84,10 @@ st.markdown("""
         border-radius: 10px;
         margin-top: 10px;
     }
+    .add-btn button {
+        background-color: #FF8C00 !important;
+        height: 2.5em !important;
+    }
     </style>
     """, unsafe_allow_html=True)
 
@@ -84,12 +111,18 @@ if 'items_int' not in st.session_state:
 if 'items_food' not in st.session_state:
     st.session_state['items_food'] = ["六九"]
 
-if 'other_issue' not in st.session_state:
-    st.session_state['other_issue'] = {
-        "defect": "",
-        "action": "",
-        "image": None
-    }
+# その他 設備不備を複数追加できるようにリスト化
+if 'other_issue_list' not in st.session_state:
+    st.session_state['other_issue_list'] = [
+        {"defect": "", "action": "", "image": None}
+    ]
+
+# 追加UI表示制御
+if 'show_add_ext' not in st.session_state:
+    st.session_state['show_add_ext'] = False
+
+if 'show_add_int' not in st.session_state:
+    st.session_state['show_add_int'] = False
 
 # --- 3. ヘッダー ---
 now_date = datetime.now().strftime("%Y/%m/%d")
@@ -158,33 +191,35 @@ def render_check_item(label, key, is_voice=False):
             st.session_state['item_data'][key]["pos"] = pos
 
 # --- 6. その他 設備不備入力関数 ---
-def render_other_issue():
+def render_other_issue(index):
+    issue = st.session_state['other_issue_list'][index]
+
     st.markdown("---")
-    st.header("【その他 設備不備】")
+    st.write(f"### ■ その他 設備不備 {index + 1}")
 
     defect = st.text_area(
         "不備内容",
-        value=st.session_state['other_issue'].get("defect", ""),
-        key="other_defect",
+        value=issue.get("defect", ""),
+        key=f"other_defect_{index}",
         placeholder="設備不備の内容を入力"
     )
-    st.session_state['other_issue']["defect"] = defect
+    st.session_state['other_issue_list'][index]["defect"] = defect
 
     action = st.text_area(
         "対応状況",
-        value=st.session_state['other_issue'].get("action", ""),
-        key="other_action",
+        value=issue.get("action", ""),
+        key=f"other_action_{index}",
         placeholder="対応状況を入力"
     )
-    st.session_state['other_issue']["action"] = action
+    st.session_state['other_issue_list'][index]["action"] = action
 
     img_file = st.file_uploader(
         "その他 設備不備の写真を添付",
         type=['png', 'jpg', 'jpeg'],
-        key="other_issue_img"
+        key=f"other_issue_img_{index}"
     )
     if img_file:
-        st.session_state['other_issue']["image"] = img_file.read()
+        st.session_state['other_issue_list'][index]["image"] = img_file.read()
 
 # --- 入力セクション ---
 
@@ -197,10 +232,40 @@ st.header("【店外設備】")
 for item in st.session_state['items_ext']:
     render_check_item(item, f"ext_{item}")
 
+# 店外項目追加ボタン（以前と同じ位置）
+with st.container():
+    st.markdown('<div class="add-btn">', unsafe_allow_html=True)
+    if st.button("＋ 店外に項目を追加", key="ext_add_btn"):
+        st.session_state["show_add_ext"] = True
+    st.markdown('</div>', unsafe_allow_html=True)
+
+if st.session_state.get("show_add_ext", False):
+    new_item = st.text_input("追加する項目名（店外）", key="add_ext_name")
+    if st.button("店外項目を確定追加", key="add_ext_confirm"):
+        if new_item and new_item not in st.session_state['items_ext']:
+            st.session_state['items_ext'].append(new_item)
+            st.session_state["show_add_ext"] = False
+            st.rerun()
+
 # ③ 店内設備
 st.header("【店内設備】")
 for item in st.session_state['items_int']:
     render_check_item(item, f"int_{item}")
+
+# 店内項目追加ボタン（以前と同じ位置）
+with st.container():
+    st.markdown('<div class="add-btn">', unsafe_allow_html=True)
+    if st.button("＋ 店内に項目を追加", key="int_add_btn"):
+        st.session_state["show_add_int"] = True
+    st.markdown('</div>', unsafe_allow_html=True)
+
+if st.session_state.get("show_add_int", False):
+    new_item = st.text_input("追加する項目名（店内）", key="add_int_name")
+    if st.button("店内項目を確定追加", key="add_int_confirm"):
+        if new_item and new_item not in st.session_state['items_int']:
+            st.session_state['items_int'].append(new_item)
+            st.session_state["show_add_int"] = False
+            st.rerun()
 
 # ④ 食堂
 st.header("【食堂】")
@@ -208,7 +273,20 @@ for item in st.session_state['items_food']:
     render_check_item(item, f"food_{item}")
 
 # ⑤ その他 設備不備
-render_other_issue()
+st.header("【その他 設備不備】")
+for i in range(len(st.session_state['other_issue_list'])):
+    render_other_issue(i)
+
+with st.container():
+    st.markdown('<div class="add-btn">', unsafe_allow_html=True)
+    if st.button("＋ その他 設備不備を追加", key="other_issue_add_btn"):
+        st.session_state['other_issue_list'].append({
+            "defect": "",
+            "action": "",
+            "image": None
+        })
+        st.rerun()
+    st.markdown('</div>', unsafe_allow_html=True)
 
 # --- 7. 報告書生成 ---
 st.divider()
@@ -221,7 +299,7 @@ if st.button("👉 報告書(画像)を生成して保存"):
             map_img = Image.open(io.BytesIO(st.session_state['map_data'])).convert("RGB")
 
             # まずは大きめキャンバスを作成し、最後に必要な高さでcrop
-            base_h = 7000
+            base_h = 9000
             w, h = 1000, base_h + map_img.height
             report = Image.new('RGB', (w, h), color='white')
             d = ImageDraw.Draw(report)
@@ -271,7 +349,7 @@ if st.button("👉 報告書(画像)を生成して保存"):
                             line_spacing=8
                         )
 
-                    if (not label == "お客様の声") and pos_text:
+                    if (label != "お客様の声") and pos_text:
                         curr_y = draw_multiline_text(
                             d,
                             f"位置: {pos_text}",
@@ -284,62 +362,65 @@ if st.button("👉 報告書(画像)を生成して保存"):
                         )
 
                     if v.get("image"):
-                        try:
-                            photo = Image.open(io.BytesIO(v["image"])).convert("RGB")
-                            photo.thumbnail((350, 350))
-                            report.paste(photo, (80, curr_y + 5))
-                            curr_y += photo.height + 25
-                        except Exception:
-                            pass
+                        curr_y = paste_image_keep_orientation(
+                            report,
+                            v["image"],
+                            80,
+                            curr_y + 5,
+                            max_w=350,
+                            max_h=350
+                        )
 
                 d.line([(50, curr_y), (950, curr_y)], fill="#dddddd")
                 curr_y += 30
 
             # その他 設備不備
-            other_defect = st.session_state['other_issue'].get("defect", "").strip()
-            other_action = st.session_state['other_issue'].get("action", "").strip()
-            other_image = st.session_state['other_issue'].get("image")
+            for issue in st.session_state['other_issue_list']:
+                other_defect = issue.get("defect", "").strip()
+                other_action = issue.get("action", "").strip()
+                other_image = issue.get("image")
 
-            if other_defect or other_action or other_image:
-                d.text((50, curr_y), "■ その他 設備不備", fill="black", font=f_text)
-                d.text((800, curr_y), "[記載あり]", fill="red", font=f_text)
-                curr_y += 42
+                if other_defect or other_action or other_image:
+                    d.text((50, curr_y), "■ その他 設備不備", fill="black", font=f_text)
+                    d.text((800, curr_y), "[記載あり]", fill="red", font=f_text)
+                    curr_y += 42
 
-                if other_defect:
-                    curr_y = draw_multiline_text(
-                        d,
-                        f"不備内容: {other_defect}",
-                        80,
-                        curr_y,
-                        f_text,
-                        fill="black",
-                        max_chars=38,
-                        line_spacing=8
-                    )
+                    if other_defect:
+                        curr_y = draw_multiline_text(
+                            d,
+                            f"不備内容: {other_defect}",
+                            80,
+                            curr_y,
+                            f_text,
+                            fill="black",
+                            max_chars=38,
+                            line_spacing=8
+                        )
 
-                if other_action:
-                    curr_y = draw_multiline_text(
-                        d,
-                        f"対応状況: {other_action}",
-                        80,
-                        curr_y,
-                        f_text,
-                        fill="black",
-                        max_chars=38,
-                        line_spacing=8
-                    )
+                    if other_action:
+                        curr_y = draw_multiline_text(
+                            d,
+                            f"対応状況: {other_action}",
+                            80,
+                            curr_y,
+                            f_text,
+                            fill="black",
+                            max_chars=38,
+                            line_spacing=8
+                        )
 
-                if other_image:
-                    try:
-                        photo = Image.open(io.BytesIO(other_image)).convert("RGB")
-                        photo.thumbnail((350, 350))
-                        report.paste(photo, (80, curr_y + 5))
-                        curr_y += photo.height + 25
-                    except Exception:
-                        pass
+                    if other_image:
+                        curr_y = paste_image_keep_orientation(
+                            report,
+                            other_image,
+                            80,
+                            curr_y + 5,
+                            max_w=350,
+                            max_h=350
+                        )
 
-                d.line([(50, curr_y), (950, curr_y)], fill="#dddddd")
-                curr_y += 30
+                    d.line([(50, curr_y), (950, curr_y)], fill="#dddddd")
+                    curr_y += 30
 
             # 最後の記載位置に合わせて下余白をカット
             final_height = min(curr_y + 20, h)
