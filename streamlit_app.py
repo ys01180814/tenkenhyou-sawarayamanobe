@@ -88,9 +88,11 @@ def paste_image_keep_orientation(base_img, image_bytes, x, y, max_w=350, max_h=3
     try:
         photo = Image.open(io.BytesIO(image_bytes)).convert("RGB")
         original_w, original_h = photo.size
+
         ratio = min(max_w / original_w, max_h / original_h)
         new_w = max(1, int(original_w * ratio))
         new_h = max(1, int(original_h * ratio))
+
         photo = photo.resize((new_w, new_h))
         base_img.paste(photo, (x, y))
         return y + new_h + 25
