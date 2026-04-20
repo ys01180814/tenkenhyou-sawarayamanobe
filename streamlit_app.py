@@ -82,33 +82,36 @@ def draw_multiline_text(draw, text, x, y, font, fill="black", max_chars=38, line
 
     return y
 
+def fit_image_size(original_w, original_h, max_w=350, max_h=350):
+    ratio = min(max_w / original_w, max_h / original_h)
+    new_w = max(1, int(original_w * ratio))
+    new_h = max(1, int(original_h * ratio))
+    return new_w, new_h
+
 def paste_image_keep_orientation(base_img, image_bytes, x, y, max_w=350, max_h=350):
     if not image_bytes:
         return y
     try:
         photo = Image.open(io.BytesIO(image_bytes)).convert("RGB")
         original_w, original_h = photo.size
-        ratio = min(max_w / original_w, max_h / original_h)
-        new_w = max(1, int(original_w * ratio))
-        new_h = max(1, int(original_h * ratio))
+        new_w, new_h = fit_image_size(original_w, original_h, max_w=max_w, max_h=max_h)
         photo = photo.resize((new_w, new_h))
         base_img.paste(photo, (x, y))
         return y + new_h + 25
     except Exception:
         return y
 
-def show_uploaded_image_preview(image_bytes, caption, max_width=260):
+def show_image_preview(image_bytes, caption, max_w=240, max_h=240):
     if not image_bytes:
         return
     try:
-        img = Image.open(io.BytesIO(image_bytes))
-        w, h = img.size
-        if w >= h:
-            st.image(image_bytes, caption=caption, width=max_width)
-        else:
-            st.image(image_bytes, caption=caption, width=int(max_width * 0.75))
+        photo = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+        original_w, original_h = photo.size
+        new_w, new_h = fit_image_size(original_w, original_h, max_w=max_w, max_h=max_h)
+        preview = photo.resize((new_w, new_h))
+        st.image(preview, caption=caption)
     except Exception:
-        st.image(image_bytes, caption=caption, width=max_width)
+        st.info("保存済み画像を表示できませんでした。")
 
 def default_item_record(default_status):
     return {
@@ -118,14 +121,33 @@ def default_item_record(default_status):
         "detail": ""
     }
 
-def default_other_issue_record():
+def default_other_issue_record(default_status="異常なし"):
     return {
-        "status": "異常なし",
+        "status": default_status,
         "save": False,
+        "image": None,
         "defect": "",
-        "action": "",
-        "image": None
+        "action": ""
     }
+
+def sanitize_list(items):
+    cleaned = []
+    for item in items:
+        name = str(item).strip()
+        if name and name not in cleaned:
+            cleaned.append(name)
+    return cleaned
+
+def rename_item_in_data(prefix, old_name, new_name):
+    old_key = f"{prefix}_{old_name}"
+    new_key = f"{prefix}_{new_name}"
+    if old_key in st.session_state["item_data"]:
+        st.session_state["item_data"][new_key] = st.session_state["item_data"].pop(old_key)
+
+def delete_item_in_data(prefix, name):
+    key = f"{prefix}_{name}"
+    if key in st.session_state["item_data"]:
+        del st.session_state["item_data"][key]
 
 # =========================
 # 2. 保存データ読み込み
@@ -139,6 +161,7 @@ default_items_int = [
     "バックヤード", "誘導灯", "消火器"
 ]
 default_items_food = ["六九"]
+default_items_other = ["その他 設備不備"]
 
 # =========================
 # 3. Streamlit基本設定
@@ -174,6 +197,17 @@ div[data-testid="stRadio"] label p {
     background-color: #FF8C00 !important;
     height: 2.5em !important;
 }
+.mini-btn button {
+    height: 2.2em !important;
+    margin-top: 0 !important;
+}
+.block-tools {
+    border: 1px solid #dddddd;
+    border-radius: 8px;
+    padding: 10px;
+    margin-top: 10px;
+    margin-bottom: 10px;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -195,18 +229,8 @@ if "items_int" not in st.session_state:
 if "items_food" not in st.session_state:
     st.session_state["items_food"] = saved_data.get("items_food", default_items_food)
 
-if "other_issue_list" not in st.session_state:
-    loaded_other = saved_data.get("other_issue_list", [])
-    restored_other = []
-    for row in loaded_other:
-        restored_other.append({
-            "status": row.get("status", "異常なし"),
-            "save": row.get("save", False),
-            "defect": row.get("defect", ""),
-            "action": row.get("action", ""),
-            "image": b64_to_image_bytes(row.get("image"))
-        })
-    st.session_state["other_issue_list"] = restored_other if restored_other else [default_other_issue_record()]
+if "items_other" not in st.session_state:
+    st.session_state["items_other"] = saved_data.get("items_other", default_items_other)
 
 if "show_add_ext" not in st.session_state:
     st.session_state["show_add_ext"] = False
@@ -214,12 +238,19 @@ if "show_add_ext" not in st.session_state:
 if "show_add_int" not in st.session_state:
     st.session_state["show_add_int"] = False
 
+if "show_add_food" not in st.session_state:
+    st.session_state["show_add_food"] = False
+
+if "show_add_other" not in st.session_state:
+    st.session_state["show_add_other"] = False
+
 if "last_report_png" not in st.session_state:
     st.session_state["last_report_png"] = None
 
 if "last_report_image" not in st.session_state:
     st.session_state["last_report_image"] = None
 
+# item_data 復元
 if not st.session_state["item_data"]:
     loaded_item_data = saved_data.get("item_data", {})
     restored = {}
@@ -232,6 +263,46 @@ if not st.session_state["item_data"]:
             "detail": v.get("detail", "")
         }
     st.session_state["item_data"] = restored
+
+# other_issue_data を item_data 化して吸収
+loaded_other_items = saved_data.get("other_item_data", {})
+for k, v in loaded_other_items.items():
+    if k not in st.session_state["item_data"]:
+        st.session_state["item_data"][k] = {
+            "status": v.get("status", "異常なし"),
+            "save": v.get("save", False),
+            "image": b64_to_image_bytes(v.get("image")),
+            "detail": v.get("detail", "")
+        }
+
+loaded_other_issue_list = saved_data.get("other_issue_list", [])
+if loaded_other_issue_list:
+    for idx, row in enumerate(loaded_other_issue_list):
+        name = f"その他 設備不備{idx+1}" if idx > 0 else "その他 設備不備"
+        if name not in st.session_state["items_other"]:
+            st.session_state["items_other"].append(name)
+        key = f"other_{name}"
+        if key not in st.session_state["item_data"]:
+            detail_text = ""
+            defect = row.get("defect", "")
+            action = row.get("action", "")
+            if defect:
+                detail_text += f"不備内容: {defect}"
+            if action:
+                if detail_text:
+                    detail_text += "\n"
+                detail_text += f"対応状況:\n{action}"
+            st.session_state["item_data"][key] = {
+                "status": row.get("status", "異常なし"),
+                "save": row.get("save", False),
+                "image": b64_to_image_bytes(row.get("image")),
+                "detail": detail_text
+            }
+
+st.session_state["items_ext"] = sanitize_list(st.session_state["items_ext"])
+st.session_state["items_int"] = sanitize_list(st.session_state["items_int"])
+st.session_state["items_food"] = sanitize_list(st.session_state["items_food"])
+st.session_state["items_other"] = sanitize_list(st.session_state["items_other"])
 
 # =========================
 # 5. 永続化関数
@@ -247,23 +318,12 @@ def persist_saved_content():
                 "detail": value.get("detail", "")
             }
 
-    persist_other_list = []
-    for row in st.session_state["other_issue_list"]:
-        if row.get("save"):
-            persist_other_list.append({
-                "status": row.get("status", "異常なし"),
-                "save": True,
-                "defect": row.get("defect", ""),
-                "action": row.get("action", ""),
-                "image": image_bytes_to_b64(row.get("image"))
-            })
-
     data = {
         "items_ext": st.session_state["items_ext"],
         "items_int": st.session_state["items_int"],
         "items_food": st.session_state["items_food"],
-        "item_data": persist_item_data,
-        "other_issue_list": persist_other_list
+        "items_other": st.session_state["items_other"],
+        "item_data": persist_item_data
     }
     save_json_state(data)
 
@@ -298,9 +358,80 @@ if st.session_state["map_data"]:
     st.image(st.session_state["map_data"], caption="店舗配置図", use_container_width=True)
 
 # =========================
-# 8. 点検項目入力
+# 8. 項目管理UI
 # =========================
-def render_check_item(label, key, is_voice=False):
+def render_section_manager(section_title, prefix, list_name, add_flag_name, add_label):
+    st.header(section_title)
+
+    items = st.session_state[list_name]
+
+    if items:
+        with st.expander(f"{section_title} の項目編集", expanded=False):
+            delete_target = st.selectbox(
+                "削除する項目",
+                options=["選択してください"] + items,
+                key=f"delete_select_{list_name}"
+            )
+            col_m1, col_m2 = st.columns(2)
+            with col_m1:
+                rename_target = st.selectbox(
+                    "名前を変更する項目",
+                    options=["選択してください"] + items,
+                    key=f"rename_select_{list_name}"
+                )
+            with col_m2:
+                rename_new = st.text_input(
+                    "新しい項目名",
+                    key=f"rename_new_{list_name}"
+                )
+
+            col_b1, col_b2 = st.columns(2)
+            with col_b1:
+                if st.button("項目名を変更", key=f"rename_btn_{list_name}"):
+                    if rename_target != "選択してください" and rename_new.strip():
+                        new_name = rename_new.strip()
+                        if new_name not in items:
+                            idx = items.index(rename_target)
+                            items[idx] = new_name
+                            rename_item_in_data(prefix, rename_target, new_name)
+                            persist_saved_content()
+                            st.rerun()
+                        else:
+                            st.warning("同じ名前の項目が既にあります。")
+            with col_b2:
+                if st.button("項目を削除", key=f"delete_btn_{list_name}"):
+                    if delete_target != "選択してください":
+                        items.remove(delete_target)
+                        delete_item_in_data(prefix, delete_target)
+                        persist_saved_content()
+                        st.rerun()
+
+    for item in items:
+        render_check_item(item, f"{prefix}_{item}", is_voice=False, is_other=(prefix == "other"))
+
+    with st.container():
+        st.markdown('<div class="add-btn">', unsafe_allow_html=True)
+        if st.button(add_label, key=f"add_btn_{list_name}"):
+            st.session_state[add_flag_name] = True
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    if st.session_state.get(add_flag_name, False):
+        new_item = st.text_input(f"追加する項目名（{section_title}）", key=f"new_name_{list_name}")
+        if st.button("項目を確定追加", key=f"confirm_add_{list_name}"):
+            new_name = new_item.strip()
+            if new_name:
+                if new_name not in items:
+                    items.append(new_name)
+                    persist_saved_content()
+                    st.session_state[add_flag_name] = False
+                    st.rerun()
+                else:
+                    st.warning("同じ名前の項目が既にあります。")
+
+# =========================
+# 9. 点検項目入力
+# =========================
+def render_check_item(label, key, is_voice=False, is_other=False):
     st.markdown("---")
     st.write(f"### ■ {label}")
 
@@ -308,7 +439,10 @@ def render_check_item(label, key, is_voice=False):
     default_status = options[0]
 
     if key not in st.session_state["item_data"]:
-        st.session_state["item_data"][key] = default_item_record(default_status)
+        if is_other:
+            st.session_state["item_data"][key] = default_other_issue_record(default_status)
+        else:
+            st.session_state["item_data"][key] = default_item_record(default_status)
 
     current = st.session_state["item_data"][key]
 
@@ -338,147 +472,90 @@ def render_check_item(label, key, is_voice=False):
         if img_file:
             st.session_state["item_data"][key]["image"] = img_file.read()
 
+        # 保存済み画像のプレビュー
         if st.session_state["item_data"][key].get("image"):
-            show_uploaded_image_preview(
+            show_image_preview(
                 st.session_state["item_data"][key]["image"],
                 f"{label} 添付画像"
             )
 
-        detail = st.text_area(
-            "詳細内容",
-            value=st.session_state["item_data"][key].get("detail", ""),
-            key=f"t_{key}",
-            placeholder="詳細を入力（音声入力可）"
-        )
-        st.session_state["item_data"][key]["detail"] = detail
+        if is_other:
+            defect_value = ""
+            action_value = ""
+            raw_detail = st.session_state["item_data"][key].get("detail", "")
+            if raw_detail:
+                lines = raw_detail.split("\n")
+                defect_lines = []
+                action_lines = []
+                mode = "defect"
+                for line in lines:
+                    if line.startswith("不備内容: "):
+                        defect_lines.append(line.replace("不備内容: ", "", 1))
+                    elif line == "対応状況:":
+                        mode = "action"
+                    elif line.startswith("対応状況:"):
+                        mode = "action"
+                        action_lines.append(line.replace("対応状況:", "", 1).lstrip())
+                    else:
+                        if mode == "defect":
+                            defect_lines.append(line)
+                        else:
+                            action_lines.append(line)
+                defect_value = "\n".join([x for x in defect_lines if x != ""]).strip()
+                action_value = "\n".join(action_lines).strip()
 
-def render_other_issue(index):
-    issue = st.session_state["other_issue_list"][index]
-
-    st.markdown("---")
-    st.write(f"### ■ その他 設備不備 {index + 1}")
-
-    options = ["異常なし", "異常あり", "要清掃"]
-    status = st.radio(
-        "状態",
-        options,
-        index=options.index(issue.get("status", "異常なし")) if issue.get("status", "異常なし") in options else 0,
-        key=f"other_status_{index}",
-        horizontal=True,
-        label_visibility="collapsed"
-    )
-    st.session_state["other_issue_list"][index]["status"] = status
-
-    save_flag = st.checkbox(
-        "保存",
-        value=issue.get("save", False),
-        key=f"other_save_{index}"
-    )
-    st.session_state["other_issue_list"][index]["save"] = save_flag
-
-    if status in ["異常あり", "要清掃"]:
-        defect = st.text_area(
-            "不備内容",
-            value=issue.get("defect", ""),
-            key=f"other_defect_{index}",
-            placeholder="設備不備の内容を入力"
-        )
-        st.session_state["other_issue_list"][index]["defect"] = defect
-
-        action = st.text_area(
-            "対応状況",
-            value=issue.get("action", ""),
-            key=f"other_action_{index}",
-            placeholder="対応状況を入力"
-        )
-        st.session_state["other_issue_list"][index]["action"] = action
-
-        img_file = st.file_uploader(
-            "その他 設備不備の写真を添付",
-            type=["png", "jpg", "jpeg"],
-            key=f"other_issue_img_{index}"
-        )
-        if img_file:
-            st.session_state["other_issue_list"][index]["image"] = img_file.read()
-
-        if st.session_state["other_issue_list"][index].get("image"):
-            show_uploaded_image_preview(
-                st.session_state["other_issue_list"][index]["image"],
-                f"その他 設備不備 {index + 1} 添付画像"
+            defect = st.text_area(
+                "不備内容",
+                value=defect_value,
+                key=f"defect_{key}",
+                placeholder="設備不備の内容を入力"
             )
-    else:
-        st.session_state["other_issue_list"][index]["defect"] = issue.get("defect", "")
-        st.session_state["other_issue_list"][index]["action"] = issue.get("action", "")
+
+            action = st.text_area(
+                "対応状況",
+                value=action_value,
+                key=f"action_{key}",
+                placeholder="対応状況を入力"
+            )
+
+            merged_detail = ""
+            if defect.strip():
+                merged_detail += f"不備内容: {defect.strip()}"
+            if action.strip():
+                if merged_detail:
+                    merged_detail += "\n"
+                merged_detail += f"対応状況:\n{action.strip()}"
+            st.session_state["item_data"][key]["detail"] = merged_detail
+
+        else:
+            detail = st.text_area(
+                "詳細内容",
+                value=st.session_state["item_data"][key].get("detail", ""),
+                key=f"t_{key}",
+                placeholder="詳細を入力（音声入力可）"
+            )
+            st.session_state["item_data"][key]["detail"] = detail
 
 # =========================
-# 9. 入力セクション
+# 10. 入力セクション
 # =========================
 st.subheader("🗣️ お客様の声")
 render_check_item("お客様の声", "voice", is_voice=True)
 
-st.header("【店外設備】")
-for item in st.session_state["items_ext"]:
-    render_check_item(item, f"ext_{item}")
-
-with st.container():
-    st.markdown('<div class="add-btn">', unsafe_allow_html=True)
-    if st.button("＋ 店外に項目を追加", key="ext_add_btn"):
-        st.session_state["show_add_ext"] = True
-    st.markdown("</div>", unsafe_allow_html=True)
-
-if st.session_state.get("show_add_ext", False):
-    new_item = st.text_input("追加する項目名（店外）", key="add_ext_name")
-    if st.button("店外項目を確定追加", key="add_ext_confirm"):
-        if new_item and new_item not in st.session_state["items_ext"]:
-            st.session_state["items_ext"].append(new_item)
-            st.session_state["show_add_ext"] = False
-            persist_saved_content()
-            st.rerun()
-
-st.header("【店内設備】")
-for item in st.session_state["items_int"]:
-    render_check_item(item, f"int_{item}")
-
-with st.container():
-    st.markdown('<div class="add-btn">', unsafe_allow_html=True)
-    if st.button("＋ 店内に項目を追加", key="int_add_btn"):
-        st.session_state["show_add_int"] = True
-    st.markdown("</div>", unsafe_allow_html=True)
-
-if st.session_state.get("show_add_int", False):
-    new_item = st.text_input("追加する項目名（店内）", key="add_int_name")
-    if st.button("店内項目を確定追加", key="add_int_confirm"):
-        if new_item and new_item not in st.session_state["items_int"]:
-            st.session_state["items_int"].append(new_item)
-            st.session_state["show_add_int"] = False
-            persist_saved_content()
-            st.rerun()
-
-st.header("【食堂】")
-for item in st.session_state["items_food"]:
-    render_check_item(item, f"food_{item}")
-
-st.header("【その他 設備不備】")
-for i in range(len(st.session_state["other_issue_list"])):
-    render_other_issue(i)
-
-with st.container():
-    st.markdown('<div class="add-btn">', unsafe_allow_html=True)
-    if st.button("＋ その他 設備不備を追加", key="other_issue_add_btn"):
-        st.session_state["other_issue_list"].append(default_other_issue_record())
-        persist_saved_content()
-        st.rerun()
-    st.markdown("</div>", unsafe_allow_html=True)
+render_section_manager("【店外設備】", "ext", "items_ext", "show_add_ext", "＋ 店外に項目を追加")
+render_section_manager("【店内設備】", "int", "items_int", "show_add_int", "＋ 店内に項目を追加")
+render_section_manager("【食堂】", "food", "items_food", "show_add_food", "＋ 食堂に項目を追加")
+render_section_manager("【その他 設備不備】", "other", "items_other", "show_add_other", "＋ その他 設備不備を追加")
 
 persist_saved_content()
 
 # =========================
-# 10. 報告書生成
+# 11. 報告書生成
 # =========================
 def generate_report_png():
     map_img = Image.open(io.BytesIO(st.session_state["map_data"])).convert("RGB")
 
-    base_h = 12000
+    base_h = 14000
     w, h = 1000, base_h + map_img.height
     report = Image.new("RGB", (w, h), color="white")
     d = ImageDraw.Draw(report)
@@ -499,25 +576,30 @@ def generate_report_png():
     d.text((50, curr_y), "【点検詳細結果】", fill="black", font=f_bold)
     curr_y += 70
 
-    for k, v in st.session_state["item_data"].items():
-        label = k.replace("ext_", "").replace("int_", "").replace("food_", "").replace("voice", "お客様の声")
+    section_order = [
+        ("店外設備", "ext", st.session_state["items_ext"]),
+        ("店内設備", "int", st.session_state["items_int"]),
+        ("食堂", "food", st.session_state["items_food"]),
+        ("その他 設備不備", "other", st.session_state["items_other"]),
+    ]
 
+    # お客様の声
+    if "voice" in st.session_state["item_data"]:
+        v = st.session_state["item_data"]["voice"]
+        label = "お客様の声"
         d.text((50, curr_y), f"■ {label}", fill="black", font=f_text)
-
-        is_err = v["status"] in ["異常あり", "要清掃", "お声あり"]
+        is_err = v["status"] in ["お声あり"]
         color = "red" if is_err else "green"
         d.text((800, curr_y), f"[{v['status']}]", fill=color, font=f_text)
         curr_y += 42
 
         if is_err:
             detail_text = v.get("detail", "").strip()
-
             if detail_text:
                 curr_y = draw_multiline_text(
                     d, f"詳細: {detail_text}", 80, curr_y, f_text,
                     fill="black", max_chars=38, line_spacing=8
                 )
-
             if v.get("image"):
                 curr_y = paste_image_keep_orientation(
                     report, v["image"], 80, curr_y + 5, max_w=350, max_h=350
@@ -526,37 +608,35 @@ def generate_report_png():
         d.line([(50, curr_y), (950, curr_y)], fill="#dddddd")
         curr_y += 30
 
-    for issue in st.session_state["other_issue_list"]:
-        other_status = issue.get("status", "異常なし")
-        other_defect = issue.get("defect", "").strip()
-        other_action = issue.get("action", "").strip()
-        other_image = issue.get("image")
+    for section_title, prefix, items in section_order:
+        for item in items:
+            key = f"{prefix}_{item}"
+            if key not in st.session_state["item_data"]:
+                continue
 
-        d.text((50, curr_y), "■ その他 設備不備", fill="black", font=f_text)
-        color = "red" if other_status in ["異常あり", "要清掃"] else "green"
-        d.text((800, curr_y), f"[{other_status}]", fill=color, font=f_text)
-        curr_y += 42
+            v = st.session_state["item_data"][key]
+            d.text((50, curr_y), f"■ {item}", fill="black", font=f_text)
 
-        if other_status in ["異常あり", "要清掃"]:
-            if other_defect:
-                curr_y = draw_multiline_text(
-                    d, f"不備内容: {other_defect}", 80, curr_y, f_text,
-                    fill="black", max_chars=38, line_spacing=8
-                )
+            is_err = v["status"] in ["異常あり", "要清掃"]
+            color = "red" if is_err else "green"
+            d.text((800, curr_y), f"[{v['status']}]", fill=color, font=f_text)
+            curr_y += 42
 
-            if other_action:
-                curr_y = draw_multiline_text(
-                    d, f"対応状況:\n{other_action}", 80, curr_y, f_text,
-                    fill="black", max_chars=38, line_spacing=8
-                )
+            if is_err:
+                detail_text = v.get("detail", "").strip()
+                if detail_text:
+                    curr_y = draw_multiline_text(
+                        d, detail_text, 80, curr_y, f_text,
+                        fill="black", max_chars=38, line_spacing=8
+                    )
 
-            if other_image:
-                curr_y = paste_image_keep_orientation(
-                    report, other_image, 80, curr_y + 5, max_w=350, max_h=350
-                )
+                if v.get("image"):
+                    curr_y = paste_image_keep_orientation(
+                        report, v["image"], 80, curr_y + 5, max_w=350, max_h=350
+                    )
 
-        d.line([(50, curr_y), (950, curr_y)], fill="#dddddd")
-        curr_y += 30
+            d.line([(50, curr_y), (950, curr_y)], fill="#dddddd")
+            curr_y += 30
 
     final_height = min(curr_y + 20, h)
     report = report.crop((0, 0, w, final_height))
@@ -567,7 +647,7 @@ def generate_report_png():
     return report, png_bytes
 
 # =========================
-# 11. 生成してコピー
+# 12. 生成してコピー
 # =========================
 st.divider()
 
