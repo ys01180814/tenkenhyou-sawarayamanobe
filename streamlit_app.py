@@ -15,8 +15,8 @@ def get_font(size):
         return ImageFont.truetype(FONT_PATH, size)
     return ImageFont.load_default()
 
-# --- 1. アプリの基本設定と視認性向上CSS ---
-st.set_page_config(page_title="佐原山之辺店 点検表", layout="centered")
+# --- 1. アプリの基本設定とCSS ---
+st.set_page_config(page_title="店舗点検表", layout="centered")
 
 st.markdown("""
     <style>
@@ -38,24 +38,18 @@ st.markdown("""
         font-weight: bold !important;
         border-radius: 8px !important;
     }
-    .del-btn button {
-        border: 1px solid #000000 !important;
-        height: 2.2em !important;
-    }
-    /* 音声入力ボタンのスタイル */
     .speech-btn {
-        background-color: #f0f2f6;
-        border: 1px solid #000;
-        border-radius: 5px;
-        padding: 5px 10px;
-        cursor: pointer;
+        background-color: #ffffff;
+        border: 2px solid #000000;
+        border-radius: 8px;
+        padding: 5px 15px;
         font-weight: bold;
-        margin-bottom: 5px;
+        cursor: pointer;
     }
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. データの保持設定 ---
+# --- 2. データの保持と項目設定 ---
 if 'map_data' not in st.session_state: st.session_state['map_data'] = None
 if 'item_data' not in st.session_state: st.session_state['item_data'] = {}
 if 'items_ext' not in st.session_state: 
@@ -65,77 +59,49 @@ if 'items_int' not in st.session_state:
 if 'items_food' not in st.session_state: 
     st.session_state['items_food'] = ["六九", "その他 設備"]
 
-if 'show_add_ext' not in st.session_state: st.session_state['show_add_ext'] = False
-if 'show_edit_ext' not in st.session_state: st.session_state['show_edit_ext'] = False
-if 'show_add_int' not in st.session_state: st.session_state['show_add_int'] = False
-if 'show_edit_int' not in st.session_state: st.session_state['show_edit_int'] = False
+# モード管理フラグ
+for key in ['show_add_ext', 'show_edit_ext', 'show_add_int', 'show_edit_int']:
+    if key not in st.session_state: st.session_state[key] = False
 
-# --- 3. 音声認識用JavaScriptコンポーネント ---
+# --- 3. 音声認識JavaScript ---
 def speech_to_text_js(key):
-    # 各入力欄に対応するJSコード
     js_code = f"""
     <div id="speech-container-{key}">
-        <button class="speech-btn" onclick="startRecognition('{key}')">🎤 声で入力（開始）</button>
-        <p id="status-{key}" style="font-size:10px; color:gray; margin:0;">マイクを押して話してください</p>
+        <button class="speech-btn" onclick="startRecognition('{key}')">🎤 声で詳細を入力</button>
+        <p id="status-{key}" style="font-size:11px; color:gray; margin-top:5px;">タップして話すと詳細欄に入力されます</p>
     </div>
     <script>
     function startRecognition(key) {{
         const status = document.getElementById('status-' + key);
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-        
-        if (!SpeechRecognition) {{
-            status.innerText = "お使いのブラウザは音声入力非対応です";
-            return;
-        }}
+        if (!SpeechRecognition) {{ status.innerText = "ブラウザ非対応です"; return; }}
 
         const recognition = new SpeechRecognition();
         recognition.lang = 'ja-JP';
-        recognition.interimResults = false;
-
-        recognition.onstart = () => {{
-            status.innerText = "音声認識中... 話してください";
-            status.style.color = "red";
-        }};
-
+        recognition.onstart = () => {{ status.innerText = "音声認識中..."; status.style.color = "red"; }};
         recognition.onresult = (event) => {{
             const text = event.results[0][0].transcript;
-            // Streamlitの親ウィンドウのテキストエリアに値を送るためのハック
+            // 親フレームのTextareaを探して値をセット（StreamlitのDOM構造に依存）
             const textareas = window.parent.document.querySelectorAll('textarea');
-            // keyに一致するラベルを持つtextareaを探して値をセット
             for (let ta of textareas) {{
-                if (ta.parentElement.parentElement.parentElement.innerText.includes('詳細内容')) {{
-                     // ここでは簡易的に直近のtextareaをターゲットにするか、
-                     // Streamlitの公式APIがないため、ユーザーにコピーしてもらうか、
-                     // session_stateへ送る仕組みが必要ですが、
-                     // 最も確実なのは「認識結果を表示してコピペ可能にする」か「自動流し込み」です。
+                // 非常に簡易的な特定方法ですが、現在アクティブなセクションの入力を補助します
+                if (ta.offsetParent !== null) {{
+                    const start = ta.selectionStart;
+                    const end = ta.selectionEnd;
+                    ta.value = ta.value.substring(0, start) + text + ta.value.substring(end);
+                    ta.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                    break;
                 }}
             }}
-            // 認識した文字を表示
-            alert("認識結果: " + text + "\\n\\n詳細内容欄に入力してください。");
-            status.innerText = "完了: " + text;
+            status.innerText = "入力完了: " + text;
             status.style.color = "green";
         }};
-
-        recognition.onerror = (event) => {{
-            status.innerText = "エラーが発生しました: " + event.error;
-            status.style.color = "orange";
-        }};
-
+        recognition.onerror = () => {{ status.innerText = "エラーが発生しました"; }};
         recognition.start();
     }}
     </script>
-    <style>
-    .speech-btn {{
-        background-color: #ffffff;
-        border: 2px solid #000000;
-        border-radius: 8px;
-        padding: 5px 15px;
-        font-weight: bold;
-        cursor: pointer;
-    }}
-    </style>
     """
-    components.html(js_code, height=70)
+    components.html(js_code, height=80)
 
 # --- 4. ヘッダー ---
 now_date = datetime.now().strftime("%Y/%m/%d")
@@ -147,14 +113,12 @@ with col_h2:
 
 st.title("店舗点検表")
 
-# --- 5. 点検項目入力用関数 ---
+# --- 5. 入力UI関数 ---
 def render_check_item(label, key, is_voice=False, section_list=None, idx=None, is_edit_mode=False):
     st.markdown(f"---")
     col_label, col_keep = st.columns([3, 1])
-    with col_label:
-        st.write(f"### ■ {label}")
-    with col_keep:
-        st.checkbox("データを保持", key=f"keep_{key}", value=False)
+    with col_label: st.write(f"### ■ {label}")
+    with col_keep: st.checkbox("データを保持", key=f"keep_{key}", value=False)
 
     if is_edit_mode and section_list is not None and idx is not None:
         if st.button(f"「{label}」を削除", key=f"del_{key}"):
@@ -171,21 +135,19 @@ def render_check_item(label, key, is_voice=False, section_list=None, idx=None, i
     
     if status in ["異常あり", "要清掃", "お声あり"]:
         img_file = st.file_uploader(f"{label}の写真を添付", type=['png', 'jpg', 'jpeg'], key=f"img_{key}")
-        if img_file:
-            st.session_state['item_data'][key]["image"] = img_file.read()
+        if img_file: st.session_state['item_data'][key]["image"] = img_file.read()
 
-        # 音声認識ボタンを表示
-        st.write("🎤 音声入力を使う：")
+        # 音声入力
         speech_to_text_js(key)
         
         detail = st.text_area(f"詳細内容", value=st.session_state['item_data'][key].get("detail", ""), key=f"t_{key}")
         st.session_state['item_data'][key]["detail"] = detail
         
+        # 「その他 設備」および「お客様の声」以外は位置メモを表示
         if not is_voice and label != "その他 設備":
             pos = st.text_input(f"{label}の位置メモ", value=st.session_state['item_data'][key].get("pos", ""), key=f"p_{key}")
             st.session_state['item_data'][key]["pos"] = pos
 
-# (以下、以前のコードと同様のアクションボタンと報告書生成ロジック)
 def render_action_area(section_list, add_flag_key, edit_flag_key, input_key):
     col1, col2 = st.columns(2)
     with col1:
@@ -195,13 +157,14 @@ def render_action_area(section_list, add_flag_key, edit_flag_key, input_key):
         if st.button("項目修正", key=f"btn_edit_ui_{input_key}"):
             st.session_state[edit_flag_key] = not st.session_state[edit_flag_key]
     if st.session_state[add_flag_key]:
-        new_name = st.text_input("追加する項目名を入力", key=f"input_{input_key}")
-        if st.button("確定して追加", key=f"confirm_{input_key}"):
+        new_name = st.text_input("項目名を入力", key=f"input_{input_key}")
+        if st.button("確定", key=f"confirm_{input_key}"):
             if new_name:
                 section_list.append(new_name)
                 st.session_state[add_flag_key] = False
                 st.rerun()
 
+# 各セクション描画
 st.subheader("🗣️ お客様の声")
 render_check_item("お客様の声", "voice", is_voice=True)
 
@@ -219,9 +182,9 @@ st.header("【食堂・その他】")
 for i, item in enumerate(st.session_state['items_food']):
     render_check_item(item, f"food_{item}")
 
-# --- 報告書生成 ---
+# --- 6. 報告書生成ロジック ---
 st.divider()
-split_option = st.radio("報告書の生成方法", ["1枚にまとめる", "2枚に分ける"], horizontal=True)
+split_option = st.radio("生成方法", ["1枚にまとめる", "2枚に分ける"], horizontal=True)
 
 def draw_report_content(draw, start_y, item_keys, report_img):
     curr_y = start_y
@@ -230,11 +193,13 @@ def draw_report_content(draw, start_y, item_keys, report_img):
         if k not in st.session_state['item_data']: continue
         v = st.session_state['item_data'][k]
         is_err = v["status"] in ["異常あり", "要清掃", "お声あり"]
-        if "その他 設備" in k and not is_err: continue
+        
+        # タイトル・項目を戻す：異常なしでも全項目を記載する
         label = k.replace("ext_","").replace("int_","").replace("food_","").replace("voice","お客様の声")
         draw.text((50, curr_y), f"■ {label}", fill="black", font=f_text)
         draw.text((800, curr_y), f"[{v['status']}]", fill=("red" if is_err else "green"), font=f_text)
         curr_y += 35
+        
         if is_err:
             info_txt = f"詳細: {v.get('detail','')} ({v.get('pos','')})"
             draw.text((80, curr_y), info_txt, fill="black", font=f_text)
@@ -252,20 +217,19 @@ def draw_report_content(draw, start_y, item_keys, report_img):
 
 def create_base_report(map_data, title_suffix=""):
     map_img = Image.open(io.BytesIO(map_data)).convert("RGB")
-    report = Image.new('RGB', (1000, 5000), color='white')
+    report = Image.new('RGB', (1000, 6000), color='white')
     d = ImageDraw.Draw(report)
     d.text((500, 80), f"{shop_name} 点検報告書{title_suffix}", fill="black", font=get_font(60), anchor="ms")
-    d.text((50, 160), f"点検者：{inspector}    点検日：{now_date}", fill="black", font=f_text)
+    d.text((50, 160), f"点検者：{inspector}    点検日：{now_date}", fill="black", font=get_font(28))
     mw = 900
     mh = int(mw * map_img.height / map_img.width)
     report.paste(map_img.resize((mw, mh)), (50, 250))
     return report, d, 300 + mh
 
 if st.button("👉 報告書を生成"):
-    if not st.session_state['map_data']:
-        st.error("配置図をアップロードしてください")
+    if not st.session_state['map_data']: st.error("配置図をアップロードしてください")
     else:
-        with st.spinner("画像を生成中..."):
+        with st.spinner("生成中..."):
             ext_keys = ["voice"] + [f"ext_{i}" for i in st.session_state['items_ext']]
             int_food_keys = [f"int_{i}" for i in st.session_state['items_int']] + [f"food_{i}" for i in st.session_state['items_food']]
             if split_option == "1枚にまとめる":
@@ -274,4 +238,4 @@ if st.button("👉 報告書を生成"):
                 final = report.crop((0, 0, 1000, y + 50))
                 st.image(final, use_container_width=True)
                 buf = io.BytesIO(); final.save(buf, format="PNG")
-                st.download_button("報告書を保存", buf.getvalue(), "report.png", "image/png")
+                st.download_button("保存", buf.getvalue(), "report.png", "image/png")
