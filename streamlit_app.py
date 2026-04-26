@@ -19,12 +19,13 @@ def get_font(size):
         return ImageFont.truetype(FONT_PATH, size)
     return ImageFont.load_default()
 
-# --- 2. データ保持（ここが「消えない」ための最重要部分） ---
+# --- 2. データ保持 ---
 if 'item_data' not in st.session_state:
     st.session_state['item_data'] = {}
 
+# 点検項目（「その他 設備」を追加）
 ITEMS_EXT = ["駐車場・駐輪場", "サイバービジョン", "店外照明", "幟"]
-ITEMS_INT = ["風除室", "店内照明", "カウンター", "喫煙ルーム", "休憩コーナー", "トイレ", "空調設備", "音響設備", "バックヤード", "誘導灯", "消火器"]
+ITEMS_INT = ["風除室", "店内照明", "カウンター", "喫煙ルーム", "休憩コーナー", "トイレ", "空調設備", "音響設備", "バックヤード", "誘導灯", "消火器", "その他 設備"]
 
 # --- 3. 音声入力機能 ---
 def speech_input_button(key):
@@ -48,7 +49,7 @@ def speech_input_button(key):
     }}
     </script>
     <button onclick="startRec('{key}')" style="width:100%; padding:10px; border-radius:8px; border:2px solid black; background:white; font-weight:bold; cursor:pointer; margin-bottom:10px;">
-        🎤 音声入力（詳細欄へ書き込み）
+        🎤 音声入力（開始）
     </button>
     """
     components.html(js_code, height=60)
@@ -61,7 +62,7 @@ st.subheader("📍 店舗配置図")
 if os.path.exists(MAP_IMAGE_PATH):
     st.image(MAP_IMAGE_PATH, use_container_width=True)
 else:
-    st.warning("GitHubに 'map.png' が見つかりません。")
+    st.info("GitHubに 'map.png' をアップロードするとここに自動表示されます。")
 
 # ヘッダー
 now_date = datetime.now().strftime("%Y/%m/%d")
@@ -69,42 +70,29 @@ col1, col2 = st.columns(2)
 shop_name = col1.text_input("店舗名", value="佐原山之辺店")
 inspector = col2.text_input("点検者", value="伊藤 康規")
 
-# --- 5. 点検入力関数（画像保持を強化） ---
+# --- 5. 点検入力関数 ---
 def render_item(label, key):
     st.markdown("---")
     col_l, col_r = st.columns([3, 1])
     with col_l: st.write(f"### ■ {label}")
     with col_r: keep = st.checkbox("データを保持", key=f"k_{key}")
 
-    # 初期化（データが空、または「保持」にチェックがない場合のみリセット）
     if key not in st.session_state['item_data'] or not keep:
         st.session_state['item_data'][key] = {"status": "異常なし", "detail": "", "image": None}
     
     dat = st.session_state['item_data'][key]
-    
-    # 状態の選択
     status = st.radio("判定", ["異常なし", "異常あり", "要清掃"], 
                       index=["異常なし", "異常あり", "要清掃"].index(dat["status"]), 
                       key=f"r_{key}", horizontal=True)
     st.session_state['item_data'][key]["status"] = status
 
     if status != "異常なし":
-        # 音声入力
         speech_input_button(key)
-        
-        # 詳細テキストの保持
         st.session_state['item_data'][key]["detail"] = st.text_area("詳細内容", value=dat["detail"], key=f"t_{key}")
-        
-        # 【重要】画像アップロードと即時保護
-        img_file = st.file_uploader("写真を添付", type=['png', 'jpg', 'jpeg'], key=f"i_{key}")
-        
-        if img_file is not None:
-            # アップロードされた瞬間にバイトデータとして保存
+        # 画像については一旦シンプルに
+        img_file = st.file_uploader("写真を添付", type=['png', 'jpg'], key=f"i_{key}")
+        if img_file:
             st.session_state['item_data'][key]["image"] = img_file.read()
-        
-        # すでに保存された画像がある場合はプレビュー表示
-        if st.session_state['item_data'][key]["image"]:
-            st.image(st.session_state['item_data'][key]["image"], caption="添付済み画像", width=300)
 
 st.header("【店外設備】")
 for it in ITEMS_EXT: render_item(it, f"ext_{it}")
@@ -113,7 +101,7 @@ for it in ITEMS_INT: render_item(it, f"int_{it}")
 
 # --- 6. 報告書生成 ---
 st.divider()
-mode = st.radio("出力形式", ["1枚にまとめる", "2枚に分割して保存"], horizontal=True)
+mode = st.radio("生成モード", ["1枚にまとめる", "2枚に分割"], horizontal=True)
 
 def draw_rows(draw, y, keys, img):
     f = get_font(28)
@@ -148,6 +136,14 @@ if st.button("👉 報告書を生成"):
         res = rep.crop((0, 0, 1000, y + 50)); st.image(res)
         buf = io.BytesIO(); res.save(buf, "PNG"); st.download_button("報告書を保存", buf.getvalue(), "report.png")
     else:
-        # 分割保存のロジックをここに維持
-        st.info("分割保存用ファイルを生成します...")
-        # (以前の分割保存コードを適用)
+        # 前半
+        r1 = Image.new('RGB', (1000, 4000), 'white'); d1 = ImageDraw.Draw(r1)
+        d1.text((50, 50), f"{shop_name} 報告書(1/2)", fill="black", font=get_font(40))
+        mw, mh = 900, int(900 * m_img.height / m_img.width); r1.paste(m_img.resize((mw, mh)), (50, 120))
+        y1 = draw_rows(d1, 150 + mh, e_k, r1); res1 = r1.crop((0, 0, 1000, y1 + 50)); st.image(res1)
+        b1 = io.BytesIO(); res1.save(b1, "PNG"); st.download_button("前半を保存", b1.getvalue(), "p1.png")
+        # 後半
+        r2 = Image.new('RGB', (1000, 4000), 'white'); d2 = ImageDraw.Draw(r2)
+        d2.text((50, 50), f"{shop_name} 報告書(2/2)", fill="black", font=get_font(40))
+        y2 = draw_rows(d2, 120, i_k, r2); res2 = r2.crop((0, 0, 1000, y2 + 50)); st.image(res2)
+        b2 = io.BytesIO(); res2.save(b2, "PNG"); st.download_button("後半を保存", b2.getvalue(), "p2.png")
