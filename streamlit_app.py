@@ -73,7 +73,6 @@ if 'show_edit_int' not in st.session_state: st.session_state['show_edit_int'] = 
 
 # --- 3. 音声認識JSコンポーネント ---
 def speech_to_text_js(key):
-    # ブラウザのSpeechRecognitionを使用して、親画面のtextareaに直接流し込むJS
     js_code = f"""
     <div id="speech-container-{key}">
         <button class="speech-btn" onclick="startRecognition('{key}')">🎤 音声で詳細を入力（開始）</button>
@@ -100,15 +99,12 @@ def speech_to_text_js(key):
 
         recognition.onresult = (event) => {{
             const text = event.results[0][0].transcript;
-            // Streamlitのtextarea要素を探して値をセット
             const textareas = window.parent.document.querySelectorAll('textarea');
             for (let ta of textareas) {{
-                // プレースホルダや周辺のテキストで対象のtextareaを特定する試み
                 if (ta.offsetParent !== null) {{
                     const start = ta.selectionStart;
                     const end = ta.selectionEnd;
                     ta.value = ta.value.substring(0, start) + text + ta.value.substring(end);
-                    // Streamlitに値の変更を通知
                     ta.dispatchEvent(new Event('input', {{ bubbles: true }}));
                     break;
                 }}
@@ -164,7 +160,7 @@ def render_check_item(label, key, is_voice=False, section_list=None, idx=None, i
 
     options = ["お声なし", "お声あり"] if is_voice else ["異常なし", "異常あり", "要清掃"]
     if key not in st.session_state['item_data']:
-        st.session_state['item_data'][key] = {"status": options[0], "image": None, "detail": "", "pos": ""}
+        st.session_state['item_data'][key] = {"status": options[0], "image": None, "detail": ""}
     
     curr_status = st.session_state['item_data'][key]["status"]
     default_idx = options.index(curr_status) if curr_status in options else 0
@@ -181,10 +177,6 @@ def render_check_item(label, key, is_voice=False, section_list=None, idx=None, i
         
         detail = st.text_area(f"詳細内容", value=st.session_state['item_data'][key].get("detail", ""), key=f"t_{key}")
         st.session_state['item_data'][key]["detail"] = detail
-        
-        if not is_voice and label != "その他 設備":
-            pos = st.text_input(f"{label}の位置メモ", value=st.session_state['item_data'][key].get("pos", ""), key=f"p_{key}")
-            st.session_state['item_data'][key]["pos"] = pos
 
 def render_action_area(section_list, add_flag_key, edit_flag_key, input_key):
     col1, col2 = st.columns(2)
@@ -241,7 +233,7 @@ def draw_report_content(draw, start_y, item_keys, report_img):
         curr_y += 35
         
         if is_err:
-            info_txt = f"詳細: {v.get('detail','')} ({v.get('pos','')})"
+            info_txt = f"詳細: {v.get('detail','')}"
             draw.text((80, curr_y), info_txt, fill="black", font=f_text)
             curr_y += 40
             if v.get("image"):
