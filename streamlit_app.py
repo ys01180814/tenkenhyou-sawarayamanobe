@@ -20,7 +20,6 @@ st.set_page_config(page_title="佐原山之辺店 点検表", layout="centered")
 st.markdown("""
     <style>
     .stApp { background-color: white !important; color: #000000 !important; }
-    /* 入力エリア・ボタンの共通スタイル（白背景・黒枠・黒文字） */
     input, textarea, [data-baseweb="select"] > div {
         background-color: #ffffff !important;
         color: #000000 !important;
@@ -30,7 +29,6 @@ st.markdown("""
         color: #000000 !important;
         font-weight: 900 !important;
     }
-    /* ボタンの視認性修正：白背景・黒枠・黒文字 */
     .stButton button {
         width: 100%;
         background-color: #ffffff !important;
@@ -39,10 +37,14 @@ st.markdown("""
         font-weight: bold !important;
         border-radius: 8px !important;
     }
-    /* 削除ボタンのみ視覚的に区別（細い黒枠） */
+    .mic-btn button {
+        background-color: #f0f2f6 !important;
+        border: 1px solid #000000 !important;
+        margin-bottom: 5px !important;
+    }
     .del-btn button {
         border: 1px solid #000000 !important;
-        height: 2em !important;
+        height: 2.2em !important;
     }
     </style>
     """, unsafe_allow_html=True)
@@ -57,7 +59,6 @@ if 'items_int' not in st.session_state:
 if 'items_food' not in st.session_state: 
     st.session_state['items_food'] = ["六九", "その他 設備"]
 
-# モード管理用のフラグ
 if 'show_add_ext' not in st.session_state: st.session_state['show_add_ext'] = False
 if 'show_edit_ext' not in st.session_state: st.session_state['show_edit_ext'] = False
 if 'show_add_int' not in st.session_state: st.session_state['show_add_int'] = False
@@ -87,10 +88,8 @@ def render_check_item(label, key, is_voice=False, section_list=None, idx=None, i
     with col_label:
         st.write(f"### ■ {label}")
     with col_keep:
-        # ご指示：チェックが入っていない状態をベースにする
         st.checkbox("データを保持", key=f"keep_{key}", value=False)
 
-    # 項目修正（削除）画面
     if is_edit_mode and section_list is not None and idx is not None:
         st.markdown('<div class="del-btn">', unsafe_allow_html=True)
         if st.button(f"「{label}」を削除", key=f"del_{key}"):
@@ -112,13 +111,21 @@ def render_check_item(label, key, is_voice=False, section_list=None, idx=None, i
         img_file = st.file_uploader(f"{label}の写真を添付", type=['png', 'jpg', 'jpeg'], key=f"img_{key}")
         if img_file:
             st.session_state['item_data'][key]["image"] = img_file.read()
+
+        # 音声入力ボタン
+        st.markdown('<div class="mic-btn">', unsafe_allow_html=True)
+        # st.audio_input はStreamlitの標準機能（ブラウザの録音許可が必要）
+        audio_data = st.audio_input(f"{label}の音声を録音", key=f"mic_{key}")
+        st.markdown('</div>', unsafe_allow_html=True)
+        
         detail = st.text_area(f"詳細内容", value=st.session_state['item_data'][key].get("detail", ""), key=f"t_{key}")
         st.session_state['item_data'][key]["detail"] = detail
-        if not is_voice:
+        
+        # 「その他 設備」の場合は位置メモを表示しない（店長のご指示）
+        if not is_voice and label != "その他 設備":
             pos = st.text_input(f"{label}の位置メモ", value=st.session_state['item_data'][key].get("pos", ""), key=f"p_{key}")
             st.session_state['item_data'][key]["pos"] = pos
 
-# アクションボタンのレンダリング（項目追加と項目修正を並べる）
 def render_action_area(section_list, add_flag_key, edit_flag_key, input_key):
     col1, col2 = st.columns(2)
     with col1:
@@ -128,9 +135,8 @@ def render_action_area(section_list, add_flag_key, edit_flag_key, input_key):
         if st.button("項目修正", key=f"btn_edit_ui_{input_key}"):
             st.session_state[edit_flag_key] = not st.session_state[edit_flag_key]
     
-    # 項目追加画面の表示
     if st.session_state[add_flag_key]:
-        new_name = st.text_input("追加する項目名を入力してください", key=f"input_{input_key}")
+        new_name = st.text_input("追加する項目名を入力", key=f"input_{input_key}")
         if st.button("確定して追加", key=f"confirm_{input_key}"):
             if new_name:
                 section_list.append(new_name)
@@ -167,7 +173,6 @@ def draw_report_content(draw, start_y, item_keys, report_img):
         v = st.session_state['item_data'][k]
         is_err = v["status"] in ["異常あり", "要清掃", "お声あり"]
         
-        # ご指示：その他設備だけは異常がないときは記載しない
         if "その他 設備" in k and not is_err:
             continue
         
@@ -218,21 +223,20 @@ if st.button("👉 報告書を生成"):
                 final = report.crop((0, 0, 1000, y + 50))
                 st.image(final, use_container_width=True)
                 buf = io.BytesIO(); final.save(buf, format="PNG")
-                st.download_button("報告書(全項目)を保存", buf.getvalue(), "report_full.png", "image/png")
+                st.download_button("報告書を保存", buf.getvalue(), "report.png", "image/png")
             else:
-                # 前半
                 report1, d1, y1 = create_base_report(st.session_state['map_data'], " (前半)")
                 y1 = draw_report_content(d1, y1, ext_keys, report1)
                 final1 = report1.crop((0, 0, 1000, y1 + 50))
-                st.image(final1, caption="前半", use_container_width=True)
+                st.image(final1, use_container_width=True)
                 buf1 = io.BytesIO(); final1.save(buf1, format="PNG")
                 st.download_button("報告書(前半)を保存", buf1.getvalue(), "report_1.png", "image/png")
-                # 後半
+                
                 report2 = Image.new('RGB', (1000, 4000), color='white')
                 d2 = ImageDraw.Draw(report2)
                 d2.text((500, 80), f"{shop_name} 点検報告書 (後半)", fill="black", font=get_font(60), anchor="ms")
                 y2 = draw_report_content(d2, 150, int_food_keys, report2)
                 final2 = report2.crop((0, 0, 1000, y2 + 50))
-                st.image(final2, caption="後半", use_container_width=True)
+                st.image(final2, use_container_width=True)
                 buf2 = io.BytesIO(); final2.save(buf2, format="PNG")
                 st.download_button("報告書(後半)を保存", buf2.getvalue(), "report_2.png", "image/png")
