@@ -33,9 +33,11 @@ st.markdown("""
         color: #000000 !important;
         font-weight: bold !important;
     }
-    .stButton button { width: 100%; height: 3em; background-color: #1E90FF; color: white; font-weight: bold; border-radius: 10px; margin-top: 10px; }
-    .add-btn button { background-color: #FF8C00 !important; height: 2.5em !important; }
-    .delete-btn button { background-color: #FF4B4B !important; height: 2em !important; font-size: 0.8rem !important; }
+    .button-row { display: flex; gap: 10px; margin-top: 10px; margin-bottom: 20px; }
+    .stButton button { width: 100%; height: 3em; font-weight: bold; border-radius: 10px; }
+    .add-btn button { background-color: #FF8C00 !important; color: white !important; }
+    .edit-btn button { background-color: #4CAF50 !important; color: white !important; }
+    .del-btn button { background-color: #FF4B4B !important; color: white !important; height: 2.2em !important; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -48,6 +50,7 @@ if 'items_int' not in st.session_state:
     st.session_state['items_int'] = ["風除室", "店内照明", "カウンター", "喫煙ルーム", "休憩コーナー", "トイレ", "空調設備", "音響設備", "バックヤード", "誘導灯", "消火器"]
 if 'items_food' not in st.session_state: 
     st.session_state['items_food'] = ["六九", "その他 設備"]
+if 'edit_mode' not in st.session_state: st.session_state['edit_mode'] = False
 
 # --- 3. ヘッダー ---
 now_date = datetime.now().strftime("%Y/%m/%d")
@@ -56,9 +59,6 @@ with col_h1:
     shop_name = st.text_input("店舗名", value="佐原山之辺店")
 with col_h2:
     inspector = st.text_input("点検者", value="伊藤 康規")
-
-# 【追加】保存チェックボックス
-keep_data = st.checkbox("入力内容を保持する（リロード対策）", value=True)
 
 st.title("店舗点検表")
 
@@ -74,26 +74,30 @@ if st.session_state['map_data']:
 # --- 5. 点検項目入力用関数 ---
 def render_check_item(label, key, is_voice=False, section_list=None, idx=None):
     st.markdown(f"---")
-    col_label, col_edit = st.columns([4, 1])
+    
+    col_label, col_keep = st.columns([3, 1])
     with col_label:
         st.write(f"### ■ {label}")
-    
-    # 【追加】項目の編集・削除機能（追加項目のみ）
-    if section_list is not None and idx is not None:
-        with col_edit:
-            if st.button("削除", key=f"del_{key}"):
-                section_list.pop(idx)
-                if key in st.session_state['item_data']: del st.session_state['item_data'][key]
-                st.rerun()
-    
+    with col_keep:
+        # 保存チェック（データ保持用）
+        st.checkbox("データを保持", key=f"keep_{key}", value=True)
+
+    # 削除ボタン（修正モード時かつ追加項目の場合のみ表示）
+    if st.session_state['edit_mode'] and section_list is not None and idx is not None:
+        st.markdown('<div class="del-btn">', unsafe_allow_html=True)
+        if st.button(f"「{label}」を削除", key=f"del_{key}"):
+            section_list.pop(idx)
+            if key in st.session_state['item_data']: del st.session_state['item_data'][key]
+            st.rerun()
+        st.markdown('</div>', unsafe_allow_html=True)
+
     options = ["お声なし", "お声あり"] if is_voice else ["異常なし", "異常あり", "要清掃"]
     
-    # データの初期化
     if key not in st.session_state['item_data']:
         st.session_state['item_data'][key] = {"status": options[0], "image": None, "detail": "", "pos": ""}
     
-    # 前回の値を保持しつつ表示
-    default_idx = options.index(st.session_state['item_data'][key]["status"]) if st.session_state['item_data'][key]["status"] in options else 0
+    curr_status = st.session_state['item_data'][key]["status"]
+    default_idx = options.index(curr_status) if curr_status in options else 0
     status = st.radio("状態", options, index=default_idx, key=f"r_{key}", horizontal=True, label_visibility="collapsed")
     st.session_state['item_data'][key]["status"] = status
     
@@ -109,43 +113,47 @@ def render_check_item(label, key, is_voice=False, section_list=None, idx=None):
             pos = st.text_input(f"{label}の位置メモ", value=st.session_state['item_data'][key].get("pos", ""), key=f"p_{key}")
             st.session_state['item_data'][key]["pos"] = pos
 
-# --- 入力セクション ---
+# 追加と修正ボタンの並列表示用
+def render_action_buttons(section_name, section_list, input_key):
+    col1, col2 = st.columns(2)
+    with col1:
+        st.markdown('<div class="add-btn">', unsafe_allow_html=True)
+        new_name = st.text_input(f"{section_name}項目名を入力", key=input_key)
+        if st.button(f"＋ {section_name}に追加", key=f"btn_add_{input_key}"):
+            if new_name:
+                section_list.append(new_name)
+                st.rerun()
+        st.markdown('</div>', unsafe_allow_html=True)
+    with col2:
+        st.markdown('<div class="edit-btn">', unsafe_allow_html=True)
+        st.write("") 
+        st.write("") 
+        if st.button("修正（削除）モード", key=f"btn_edit_{input_key}"):
+            st.session_state['edit_mode'] = not st.session_state['edit_mode']
+            st.rerun()
+        st.markdown('</div>', unsafe_allow_html=True)
+
+# セクション表示
 st.subheader("🗣️ お客様の声")
 render_check_item("お客様の声", "voice", is_voice=True)
 
 st.header("【店外設備】")
 for i, item in enumerate(st.session_state['items_ext']):
     render_check_item(item, f"ext_{item}", section_list=st.session_state['items_ext'] if i >= 4 else None, idx=i)
-
-with st.container():
-    st.markdown('<div class="add-btn">', unsafe_allow_html=True)
-    new_ext = st.text_input("追加する項目名（店外）", key="add_ext_input")
-    if st.button("＋ 店外に項目を追加"):
-        if new_ext:
-            st.session_state['items_ext'].append(new_ext)
-            st.rerun()
-    st.markdown('</div>', unsafe_allow_html=True)
+render_action_buttons("店外", st.session_state['items_ext'], "add_ext")
 
 st.header("【店内設備】")
 for i, item in enumerate(st.session_state['items_int']):
     render_check_item(item, f"int_{item}", section_list=st.session_state['items_int'] if i >= 11 else None, idx=i)
-
-with st.container():
-    st.markdown('<div class="add-btn">', unsafe_allow_html=True)
-    new_int = st.text_input("追加する項目名（店内）", key="add_int_input")
-    if st.button("＋ 店内に項目を追加"):
-        if new_int:
-            st.session_state['items_int'].append(new_int)
-            st.rerun()
-    st.markdown('</div>', unsafe_allow_html=True)
+render_action_buttons("店内", st.session_state['items_int'], "add_int")
 
 st.header("【食堂・その他】")
 for i, item in enumerate(st.session_state['items_food']):
     render_check_item(item, f"food_{item}")
 
-# --- 6. 報告書生成 ---
+# --- 6. 報告書生成ロジック（修正済み） ---
 st.divider()
-split_option = st.radio("生成方法", ["1枚にまとめる", "2枚に分ける"], horizontal=True)
+split_option = st.radio("報告書の生成方法", ["1枚にまとめる", "2枚に分ける"], horizontal=True)
 
 def draw_report_content(draw, start_y, item_keys, report_img):
     curr_y = start_y
@@ -153,10 +161,14 @@ def draw_report_content(draw, start_y, item_keys, report_img):
     for k in item_keys:
         if k not in st.session_state['item_data']: continue
         v = st.session_state['item_data'][k]
-        is_err = v["status"] in ["異常あり", "要清掃", "お声あり"]
-        # 異常がない項目は表示しない（その他設備などのためのロジック）
-        if not is_err and "その他 設備" in k: continue
         
+        is_err = v["status"] in ["異常あり", "要清掃", "お声あり"]
+        
+        # 【重要ルール】「その他 設備」だけは異常がない時はスキップ
+        if "その他 設備" in k and not is_err:
+            continue
+        
+        # それ以外の項目は、異常なしでもチェック外していても記載する
         label = k.replace("ext_","").replace("int_","").replace("food_","").replace("voice","お客様の声")
         draw.text((50, curr_y), f"■ {label}", fill="black", font=f_text)
         color = "red" if is_err else "green"
@@ -180,12 +192,11 @@ def draw_report_content(draw, start_y, item_keys, report_img):
 
 def create_base_report(map_data, title_suffix=""):
     map_img = Image.open(io.BytesIO(map_data)).convert("RGB")
-    report = Image.new('RGB', (1000, 4000), color='white')
+    report = Image.new('RGB', (1000, 5000), color='white')
     d = ImageDraw.Draw(report)
     f_title, f_text = get_font(60), get_font(28)
     d.text((500, 80), f"店舗点検報告書{title_suffix}", fill="black", font=f_title, anchor="ms")
-    d.text((50, 160), f"店舗名：{shop_name}", fill="black", font=f_text)
-    d.text((50, 200), f"点検者：{inspector}    点検日：{now_date}", fill="black", font=f_text)
+    d.text((50, 160), f"店舗名：{shop_name}  点検者：{inspector}  日：{now_date}", fill="black", font=f_text)
     mw = 900
     mh = int(mw * map_img.height / map_img.width)
     report.paste(map_img.resize((mw, mh)), (50, 250))
@@ -195,7 +206,7 @@ if st.button("👉 報告書を生成"):
     if not st.session_state['map_data']:
         st.error("配置図をアップロードしてください")
     else:
-        with st.spinner("生成中..."):
+        with st.spinner("画像を生成中..."):
             ext_keys = ["voice"] + [f"ext_{i}" for i in st.session_state['items_ext']]
             int_food_keys = [f"int_{i}" for i in st.session_state['items_int']] + [f"food_{i}" for i in st.session_state['items_food']]
             
@@ -205,21 +216,21 @@ if st.button("👉 報告書を生成"):
                 final = report.crop((0, 0, 1000, y + 50))
                 st.image(final, use_container_width=True)
                 buf = io.BytesIO(); final.save(buf, format="PNG")
-                st.download_button("保存", buf.getvalue(), "report_full.png", "image/png")
+                st.download_button("画像を保存", buf.getvalue(), "report.png", "image/png")
             else:
                 # 前半
                 report1, d1, y1 = create_base_report(st.session_state['map_data'], " (前半)")
                 y1 = draw_report_content(d1, y1, ext_keys, report1)
                 final1 = report1.crop((0, 0, 1000, y1 + 50))
-                st.image(final1, caption="前半", use_container_width=True)
+                st.image(final1, use_container_width=True)
                 buf1 = io.BytesIO(); final1.save(buf1, format="PNG")
-                st.download_button("前半を保存", buf1.getvalue(), "report_part1.png", "image/png")
+                st.download_button("前半を保存", buf1.getvalue(), "report_1.png", "image/png")
                 # 後半
-                report2 = Image.new('RGB', (1000, 3000), color='white')
+                report2 = Image.new('RGB', (1000, 4000), color='white')
                 d2 = ImageDraw.Draw(report2)
                 d2.text((500, 80), "店舗点検報告書 (後半)", fill="black", font=get_font(60), anchor="ms")
                 y2 = draw_report_content(d2, 150, int_food_keys, report2)
                 final2 = report2.crop((0, 0, 1000, y2 + 50))
-                st.image(final2, caption="後半", use_container_width=True)
+                st.image(final2, use_container_width=True)
                 buf2 = io.BytesIO(); final2.save(buf2, format="PNG")
-                st.download_button("後半を保存", buf2.getvalue(), "report_part2.png", "image/png")
+                st.download_button("後半を保存", buf2.getvalue(), "report_2.png", "image/png")
