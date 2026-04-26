@@ -1,153 +1,141 @@
 import streamlit as st
-import streamlit.components.v1 as components
-from datetime import datetime
-import PIL.Image as Image
-import PIL.ImageDraw as ImageDraw
-import PIL.ImageFont as ImageFont
-import io
 import os
+import pandas as pd
+from datetime import datetime
+from PIL import Image
 
-# --- 1. 基本設定 ---
-st.set_page_config(page_title="佐原山之辺店 点検表", layout="centered")
+# 1. 保存用設定（アップロード画像用）
+SAVE_DIR = "saved_images"
+if not os.path.exists(SAVE_DIR):
+    os.makedirs(SAVE_DIR)
 
-# 固定パス
-FONT_PATH = "NotoSansJP-Regular.ttf"
-MAP_IMAGE_PATH = "map.png"
+# 2. 配置図のパス設定
+MAP_FILE = "map.png"
 
-def get_font(size):
-    if os.path.exists(FONT_PATH):
-        return ImageFont.truetype(FONT_PATH, size)
-    return ImageFont.load_default()
+# ページ設定
+st.set_page_config(page_title="店舗点検アプリ", layout="centered")
 
-# --- 2. データ保持（ここが「消えない」ための最重要部分） ---
-if 'item_data' not in st.session_state:
-    st.session_state['item_data'] = {}
+# デザイン調整
+st.markdown("""
+    <style>
+    .report-box {
+        background-color: #ffffff;
+        color: #000000;
+        padding: 20px;
+        border: 1px solid #ddd;
+    }
+    .status-normal { color: #28a745; font-weight: bold; }
+    .status-error { color: #dc3545; font-weight: bold; }
+    .stButton button { width: 100%; }
+    </style>
+    """, unsafe_allow_html=True)
 
-ITEMS_EXT = ["駐車場・駐輪場", "サイバービジョン", "店外照明", "幟"]
-ITEMS_INT = ["風除室", "店内照明", "カウンター", "喫煙ルーム", "休憩コーナー", "トイレ", "空調設備", "音響設備", "バックヤード", "誘導灯", "消火器"]
+def main():
+    st.title("📋 店舗点検表")
 
-# --- 3. 音声入力機能 ---
-def speech_input_button(key):
-    js_code = f"""
-    <script>
-    function startRec(key) {{
-        const recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
-        recognition.lang = 'ja-JP';
-        recognition.onresult = (event) => {{
-            const text = event.results[0][0].transcript;
-            const textareas = window.parent.document.querySelectorAll('textarea');
-            for(let ta of textareas) {{
-                if(ta.offsetParent && ta.parentElement.parentElement.innerText.includes('詳細')) {{
-                    ta.value += text;
-                    ta.dispatchEvent(new Event('input', {{ bubbles: true }}));
-                    break;
-                }}
-            }}
-        }};
-        recognition.start();
-    }}
-    </script>
-    <button onclick="startRec('{key}')" style="width:100%; padding:10px; border-radius:8px; border:2px solid black; background:white; font-weight:bold; cursor:pointer; margin-bottom:10px;">
-        🎤 音声入力（詳細欄へ書き込み）
-    </button>
-    """
-    components.html(js_code, height=60)
-
-# --- 4. メイン画面 ---
-st.title("店舗点検表")
-
-# 📍 配置図
-st.subheader("📍 店舗配置図")
-if os.path.exists(MAP_IMAGE_PATH):
-    st.image(MAP_IMAGE_PATH, use_container_width=True)
-else:
-    st.warning("GitHubに 'map.png' が見つかりません。")
-
-# ヘッダー
-now_date = datetime.now().strftime("%Y/%m/%d")
-col1, col2 = st.columns(2)
-shop_name = col1.text_input("店舗名", value="佐原山之辺店")
-inspector = col2.text_input("点検者", value="伊藤 康規")
-
-# --- 5. 点検入力関数（画像保持を強化） ---
-def render_item(label, key):
-    st.markdown("---")
-    col_l, col_r = st.columns([3, 1])
-    with col_l: st.write(f"### ■ {label}")
-    with col_r: keep = st.checkbox("データを保持", key=f"k_{key}")
-
-    # 初期化（データが空、または「保持」にチェックがない場合のみリセット）
-    if key not in st.session_state['item_data'] or not keep:
-        st.session_state['item_data'][key] = {"status": "異常なし", "detail": "", "image": None}
-    
-    dat = st.session_state['item_data'][key]
-    
-    # 状態の選択
-    status = st.radio("判定", ["異常なし", "異常あり", "要清掃"], 
-                      index=["異常なし", "異常あり", "要清掃"].index(dat["status"]), 
-                      key=f"r_{key}", horizontal=True)
-    st.session_state['item_data'][key]["status"] = status
-
-    if status != "異常なし":
-        # 音声入力
-        speech_input_button(key)
-        
-        # 詳細テキストの保持
-        st.session_state['item_data'][key]["detail"] = st.text_area("詳細内容", value=dat["detail"], key=f"t_{key}")
-        
-        # 【重要】画像アップロードと即時保護
-        img_file = st.file_uploader("写真を添付", type=['png', 'jpg', 'jpeg'], key=f"i_{key}")
-        
-        if img_file is not None:
-            # アップロードされた瞬間にバイトデータとして保存
-            st.session_state['item_data'][key]["image"] = img_file.read()
-        
-        # すでに保存された画像がある場合はプレビュー表示
-        if st.session_state['item_data'][key]["image"]:
-            st.image(st.session_state['item_data'][key]["image"], caption="添付済み画像", width=300)
-
-st.header("【店外設備】")
-for it in ITEMS_EXT: render_item(it, f"ext_{it}")
-st.header("【店内設備】")
-for it in ITEMS_INT: render_item(it, f"int_{it}")
-
-# --- 6. 報告書生成 ---
-st.divider()
-mode = st.radio("出力形式", ["1枚にまとめる", "2枚に分割して保存"], horizontal=True)
-
-def draw_rows(draw, y, keys, img):
-    f = get_font(28)
-    for k in keys:
-        if k not in st.session_state['item_data']: continue
-        v = st.session_state['item_data'][k]
-        is_err = v["status"] != "異常なし"
-        label = k.split("_")[-1]
-        draw.text((50, y), f"■ {label}", fill="black", font=f)
-        draw.text((800, y), f"[{v['status']}]", fill=("red" if is_err else "green"), font=f)
-        y += 40
-        if is_err:
-            draw.text((80, y), f"詳細: {v['detail']}", fill="black", font=f); y += 40
-            if v["image"]:
-                try:
-                    p = Image.open(io.BytesIO(v["image"])); p.thumbnail((400, 400))
-                    img.paste(p, (80, y)); y += p.height + 20
-                except: pass
-        draw.line([(50, y), (950, y)], fill="#eee"); y += 30
-    return y
-
-if st.button("👉 報告書を生成"):
-    m_img = Image.open(MAP_IMAGE_PATH).convert("RGB") if os.path.exists(MAP_IMAGE_PATH) else Image.new('RGB', (900, 500), 'white')
-    e_k = [f"ext_{i}" for i in ITEMS_EXT]
-    i_k = [f"int_{i}" for i in ITEMS_INT]
-    
-    if mode == "1枚にまとめる":
-        rep = Image.new('RGB', (1000, 8000), 'white'); d = ImageDraw.Draw(rep)
-        d.text((50, 50), f"{shop_name} 報告書 ({now_date})", fill="black", font=get_font(40))
-        mw, mh = 900, int(900 * m_img.height / m_img.width); rep.paste(m_img.resize((mw, mh)), (50, 120))
-        y = draw_rows(d, 150 + mh, e_k + i_k, rep)
-        res = rep.crop((0, 0, 1000, y + 50)); st.image(res)
-        buf = io.BytesIO(); res.save(buf, "PNG"); st.download_button("報告書を保存", buf.getvalue(), "report.png")
+    # --- 店舗配置図表示 ---
+    st.subheader("📍 店舗配置図")
+    if os.path.exists(MAP_FILE):
+        st.image(MAP_FILE, use_container_width=True, caption="店舗配置図 (map.png)")
     else:
-        # 分割保存のロジックをここに維持
-        st.info("分割保存用ファイルを生成します...")
-        # (以前の分割保存コードを適用)
+        st.error(f"エラー: {MAP_FILE} が見つかりません。リポジトリに画像があるか確認してください。")
+
+    # 基本情報
+    col1, col2 = st.columns(2)
+    with col1:
+        store_name = st.text_input("店舗名", value="佐原山之辺店")
+    with col2:
+        inspector = st.text_input("点検者", value="伊藤 康規")
+
+    # --- 点検項目定義 ---
+    sections = {
+        "【お客様の声・その他】": ["お客様の声", "六九", "その他設備"],
+        "【店外設備】": ["駐車場・駐輪場", "サイバービジョン", "店外照明", "幟"],
+        "【店内設備】": ["風除室", "店内照明", "カウンター", "喫煙ルーム", "休憩コーナー", "トイレ", "空調設備", "音響設備", "バックヤード", "誘導灯", "消火器"]
+    }
+
+    results = {}
+
+    for section, items in sections.items():
+        st.markdown(f"### {section}")
+        for item in items:
+            # セッション状態を維持するためのユニークキー
+            with st.container():
+                st.write(f"**■ {item}**")
+                
+                # 判定選択
+                options = ["異常なし", "異常あり", "要清掃", "お声あり"]
+                # 「お客様の声」の場合は初期値を「お声あり」に寄せる等の調整が必要ならここで行う
+                default_idx = 0
+                res = st.radio(f"判定 ({item})", options, index=default_idx, horizontal=True, key=f"radio_{item}", label_visibility="collapsed")
+                
+                # 保持チェックボックス
+                keep_data = st.checkbox("データを保持", key=f"keep_{item}", value=True)
+                
+                detail_text = ""
+                image_path = os.path.join(SAVE_DIR, f"{item}.png")
+
+                # 「異常なし」以外の場合の詳細入力
+                if res != "異常なし":
+                    st.button(f"🎤 音声入力（詳細欄へ書き込み）", key=f"mic_{item}")
+                    detail_text = st.text_area("詳細内容", key=f"text_{item}", placeholder="具体的な状況を入力してください")
+                    uploaded_file = st.file_uploader("写真を添付", type=['png', 'jpg', 'jpeg'], key=f"img_{item}")
+                    
+                    # 画像の保存処理
+                    if uploaded_file:
+                        with open(image_path, "wb") as f:
+                            f.write(uploaded_file.getbuffer())
+                        st.success(f"{item}の画像を保存しました")
+                    
+                    # 保持されている画像の表示
+                    if os.path.exists(image_path):
+                        st.image(image_path, caption=f"現在の{item}画像", width=300)
+                
+                # 保持チェックがない場合にファイルを削除する
+                elif not keep_data and os.path.exists(image_path):
+                    os.remove(image_path)
+
+                results[item] = {
+                    "status": res,
+                    "detail": detail_text,
+                    "image": image_path if os.path.exists(image_path) else None
+                }
+            st.divider()
+
+    # --- 報告書生成 ---
+    st.subheader("📤 報告書出力")
+    if st.button("✨ 報告書を生成（コピー用画像イメージ）"):
+        # 報告書プレビュー
+        st.markdown(f"""
+        <div class="report-box">
+            <h2 style='text-align: center;'>{store_name} 点検報告書</h2>
+            <p style='text-align: center;'>点検者：{inspector} 　 点検日：{datetime.now().strftime('%Y/%m/%d')}</p>
+        """, unsafe_allow_html=True)
+        
+        # 報告書内にも配置図を表示
+        if os.path.exists(MAP_FILE):
+            st.image(MAP_FILE, use_container_width=True)
+        
+        st.markdown("<hr>", unsafe_allow_html=True)
+        
+        for item, data in results.items():
+            # 色分け表示
+            status_color = "#28a745" if data['status'] == "異常なし" else "#dc3545"
+            st.markdown(f"""
+            <div style='display: flex; justify-content: space-between; border-bottom: 1px solid #eee; padding: 5px 0;'>
+                <span style='color: black;'>■ {item}</span>
+                <span style='color: {status_color}; font-weight: bold;'>[{data['status']}]</span>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            if data['status'] != "異常なし":
+                if data['detail']:
+                    st.markdown(f"<p style='color: #333; margin-left: 20px; font-size: 0.9em;'>詳細: {data['detail']}</p>", unsafe_allow_html=True)
+                if data['image']:
+                    st.image(data['image'], width=300)
+        
+        st.markdown("</div>", unsafe_allow_html=True)
+        st.info("💡 上記の報告書範囲をスクリーンショットするか、画像を長押しして保存・貼り付けしてください。")
+
+if __name__ == "__main__":
+    main()
