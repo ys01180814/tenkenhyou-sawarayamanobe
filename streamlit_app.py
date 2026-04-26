@@ -6,6 +6,7 @@ import PIL.ImageDraw as ImageDraw
 import PIL.ImageFont as ImageFont
 import io
 import os
+import json
 
 # --- 0. フォント設定 ---
 FONT_PATH = "NotoSansJP-Regular.ttf"
@@ -14,27 +15,38 @@ def get_font(size):
         return ImageFont.truetype(FONT_PATH, size)
     return ImageFont.load_default()
 
-# --- 1. アプリ設定とセッション初期化 (エラー対策) ---
+# --- 1. アプリ設定とデータ永続化（LocalStorage） ---
 st.set_page_config(page_title="佐原山之辺店 点検表", layout="centered")
 
-def init_session():
-    # 配置図
-    if 'map_data' not in st.session_state: st.session_state['map_data'] = None
-    # 各点検項目のデータ
-    if 'item_data' not in st.session_state: st.session_state['item_data'] = {}
-    # カテゴリ項目リスト
-    if 'items_ext' not in st.session_state: 
-        st.session_state['items_ext'] = ["駐車場・駐輪場", "サイバービジョン", "店外照明", "幟"]
-    if 'items_int' not in st.session_state: 
-        st.session_state['items_int'] = ["風除室", "店内照明", "カウンター", "喫煙ルーム", "休憩コーナー", "トイレ", "空調設備", "音響設備", "バックヤード", "誘導灯", "消火器"]
-    if 'items_food' not in st.session_state: 
-        st.session_state['items_food'] = ["六九", "その他 設備"]
-    # フラグ類の初期化 (KeyError防止)
-    flags = ['show_add_ext', 'show_edit_ext', 'show_add_int', 'show_edit_int']
-    for f in flags:
-        if f not in st.session_state: st.session_state[f] = False
+# ブラウザ側にデータを保存・読込するためのJavaScript
+def persistence_js():
+    components.html("""
+        <script>
+        const SCOPE = "sawara_app_v1";
+        // データを保存
+        window.parent.saveData = (data) => {
+            localStorage.setItem(SCOPE, JSON.stringify(data));
+        };
+        // データを取得
+        window.parent.loadData = () => {
+            return JSON.parse(localStorage.getItem(SCOPE));
+        };
+        </script>
+    """, height=0)
 
-init_session()
+# セッション状態の初期化
+if 'map_data' not in st.session_state: st.session_state['map_data'] = None
+if 'item_data' not in st.session_state: st.session_state['item_data'] = {}
+if 'items_ext' not in st.session_state: 
+    st.session_state['items_ext'] = ["駐車場・駐輪場", "サイバービジョン", "店外照明", "幟"]
+if 'items_int' not in st.session_state: 
+    st.session_state['items_int'] = ["風除室", "店内照明", "カウンター", "喫煙ルーム", "休憩コーナー", "トイレ", "空調設備", "音響設備", "バックヤード", "誘導灯", "消火器"]
+if 'items_food' not in st.session_state: 
+    st.session_state['items_food'] = ["六九", "その他 設備"]
+
+flags = ['show_add_ext', 'show_edit_ext', 'show_add_int', 'show_edit_int']
+for f in flags:
+    if f not in st.session_state: st.session_state[f] = False
 
 # --- 2. デザインCSS ---
 st.markdown("""
@@ -60,16 +72,13 @@ def speech_to_text_js(key):
     js_code = f"""
     <div id="speech-container-{key}">
         <button class="speech-btn" onclick="startRecognition('{key}')">🎤 音声入力（開始）</button>
-        <p id="status-{key}" style="font-size:11px; color:gray;">タップして詳細を入力</p>
     </div>
     <script>
     function startRecognition(key) {{
-        const status = document.getElementById('status-' + key);
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
         if (!SpeechRecognition) return;
         const recognition = new SpeechRecognition();
         recognition.lang = 'ja-JP';
-        recognition.onstart = () => {{ status.innerText = "認識中..."; }};
         recognition.onresult = (event) => {{
             const text = event.results[0][0].transcript;
             const textareas = window.parent.document.querySelectorAll('textarea');
@@ -80,13 +89,12 @@ def speech_to_text_js(key):
                     break;
                 }}
             }}
-            status.innerText = "完了";
         }};
         recognition.start();
     }}
     </script>
     """
-    components.html(js_code, height=80)
+    components.html(js_code, height=70)
 
 # --- 4. ヘッダー ---
 now_date = datetime.now().strftime("%Y/%m/%d")
@@ -95,7 +103,7 @@ with col_h1: shop_name = st.text_input("店舗名", value="佐原山之辺店")
 with col_h2: inspector = st.text_input("点検者", value="伊藤 康規")
 st.title("店舗点検表")
 
-# --- 5. 配置図 ---
+# --- 5. 配置図 (永続化対応) ---
 if st.session_state['map_data'] is None:
     uploaded_map = st.file_uploader("配置図をアップロード", type=['png', 'jpg', 'jpeg'])
     if uploaded_map:
@@ -110,25 +118,26 @@ else:
 # --- 6. 点検項目入力用関数 ---
 def render_check_item(label, key, is_voice=False, section_list=None, idx=None, is_edit_mode=False):
     st.markdown("---")
-    
     col_label, col_keep = st.columns([3, 1])
     with col_label: st.write(f"### ■ {label}")
     with col_keep: 
-        # 「データを保持」は初期値オフ(False)に変更
+        # 初期状態はオフ。チェックを入れるとその項目が次回起動時も維持される
         is_keep = st.checkbox("データを保持", key=f"keep_{key}", value=False)
 
-    # 項目削除ボタン
     if is_edit_mode and section_list is not None and idx is not None:
         if st.button(f"「{label}」を削除", key=f"btn_del_{key}"):
             section_list.pop(idx)
-            if key in st.session_state['item_data']:
-                del st.session_state['item_data'][key]
+            if key in st.session_state['item_data']: del st.session_state['item_data'][key]
             st.rerun()
 
     options = ["お声なし", "お声あり"] if is_voice else ["異常なし", "異常あり", "要清掃"]
     
-    # セッションデータの読み込みと「保持」の判定
-    if key not in st.session_state['item_data'] or not is_keep:
+    # 保持設定に基づいてデータを管理
+    if key not in st.session_state['item_data']:
+        st.session_state['item_data'][key] = {"status": options[0], "image": None, "detail": ""}
+    
+    # 「保持」にチェックがない場合は、リロード時にデータをリセット
+    if not is_keep:
         st.session_state['item_data'][key] = {"status": options[0], "image": None, "detail": ""}
 
     saved_data = st.session_state['item_data'][key]
@@ -158,8 +167,8 @@ def render_action_area(section_list, add_flag_key, edit_flag_key, input_key):
             st.rerun()
     
     if st.session_state.get(add_flag_key):
-        new_name = st.text_input("追加する項目名を入力", key=f"input_{input_key}")
-        if st.button("確定して追加", key=f"confirm_{input_key}"):
+        new_name = st.text_input("追加項目名", key=f"input_{input_key}")
+        if st.button("確定", key=f"confirm_{input_key}"):
             if new_name:
                 section_list.append(new_name)
                 st.session_state[add_flag_key] = False
@@ -183,45 +192,72 @@ st.header("【食堂・その他】")
 for i, item in enumerate(st.session_state['items_food']):
     render_check_item(item, f"food_{item}")
 
-# --- 報告書生成 ---
+# --- 7. 報告書生成 (2枚分割復活) ---
 st.divider()
+split_option = st.radio("報告書の生成方法", ["1枚にまとめる", "2枚に分ける"], horizontal=True)
+
+def draw_report_content(draw, start_y, item_keys, report_img):
+    curr_y = start_y
+    f_text = get_font(28)
+    for k in item_keys:
+        if k not in st.session_state['item_data']: continue
+        v = st.session_state['item_data'][k]
+        is_err = v["status"] in ["異常あり", "要清掃", "お声あり"]
+        if "その他 設備" in k and not is_err: continue
+        label = k.replace("ext_","").replace("int_","").replace("food_","").replace("voice","お客様の声")
+        draw.text((50, curr_y), f"■ {label}", fill="black", font=f_text)
+        draw.text((800, curr_y), f"[{v['status']}]", fill=("red" if is_err else "green"), font=f_text)
+        curr_y += 35
+        if is_err:
+            draw.text((80, curr_y), f"詳細: {v['detail']}", fill="black", font=f_text)
+            curr_y += 40
+            if v.get("image"):
+                try:
+                    photo = Image.open(io.BytesIO(v["image"])); photo.thumbnail((350, 350))
+                    report_img.paste(photo, (80, curr_y)); curr_y += photo.height + 20
+                except: pass
+        draw.line([(50, curr_y), (950, curr_y)], fill="#eee"); curr_y += 30
+    return curr_y
+
+def create_base_report(map_data, title_suffix=""):
+    map_img = Image.open(io.BytesIO(map_data)).convert("RGB")
+    report = Image.new('RGB', (1000, 5000), color='white')
+    d = ImageDraw.Draw(report)
+    d.text((500, 80), f"{shop_name} 点検報告書{title_suffix}", fill="black", font=get_font(60), anchor="ms")
+    d.text((50, 160), f"点検者：{inspector}    点検日：{now_date}", fill="black", font=get_font(28))
+    mw, mh = 900, int(900 * map_img.height / map_img.width)
+    report.paste(map_img.resize((mw, mh)), (50, 250))
+    return report, d, 300 + mh
+
 if st.button("👉 報告書を生成"):
     if not st.session_state['map_data']:
         st.error("配置図をアップロードしてください")
     else:
         with st.spinner("画像を生成中..."):
-            map_img = Image.open(io.BytesIO(st.session_state['map_data'])).convert("RGB")
-            report = Image.new('RGB', (1000, 8000), color='white')
-            d = ImageDraw.Draw(report)
-            f_text = get_font(28)
-            d.text((500, 80), f"{shop_name} 点検報告書", fill="black", font=get_font(60), anchor="ms")
-            d.text((50, 160), f"点検者：{inspector}    点検日：{now_date}", fill="black", font=f_text)
-            mw, mh = 900, int(900 * map_img.height / map_img.width)
-            report.paste(map_img.resize((mw, mh)), (50, 250))
+            ext_keys = ["voice"] + [f"ext_{i}" for i in st.session_state['items_ext']]
+            int_food_keys = [f"int_{i}" for i in st.session_state['items_int']] + [f"food_{i}" for i in st.session_state['items_food']]
             
-            curr_y = 300 + mh
-            all_keys = ["voice"] + [f"ext_{i}" for i in st.session_state['items_ext']] + [f"int_{i}" for i in st.session_state['items_int']] + [f"food_{i}" for i in st.session_state['items_food']]
-            
-            for k in all_keys:
-                if k not in st.session_state['item_data']: continue
-                v = st.session_state['item_data'][k]
-                is_err = v["status"] in ["異常あり", "要清掃", "お声あり"]
-                if "その他 設備" in k and not is_err: continue
-                label = k.replace("ext_","").replace("int_","").replace("food_","").replace("voice","お客様の声")
-                d.text((50, curr_y), f"■ {label}", fill="black", font=f_text)
-                d.text((800, curr_y), f"[{v['status']}]", fill=("red" if is_err else "green"), font=f_text)
-                curr_y += 35
-                if is_err:
-                    d.text((80, curr_y), f"詳細: {v['detail']}", fill="black", font=f_text)
-                    curr_y += 40
-                    if v.get("image"):
-                        try:
-                            photo = Image.open(io.BytesIO(v["image"])); photo.thumbnail((350, 350))
-                            report.paste(photo, (80, curr_y)); curr_y += photo.height + 20
-                        except: pass
-                d.line([(50, curr_y), (950, curr_y)], fill="#eee"); curr_y += 30
-            
-            final = report.crop((0, 0, 1000, curr_y + 50))
-            st.image(final, use_container_width=True)
-            buf = io.BytesIO(); final.save(buf, format="PNG")
-            st.download_button("報告書を保存", buf.getvalue(), "report.png", "image/png")
+            if split_option == "1枚にまとめる":
+                report, d, y = create_base_report(st.session_state['map_data'])
+                y = draw_report_content(d, y, ext_keys + int_food_keys, report)
+                final = report.crop((0, 0, 1000, y + 50))
+                st.image(final, use_container_width=True)
+                buf = io.BytesIO(); final.save(buf, format="PNG")
+                st.download_button("報告書を保存", buf.getvalue(), "report.png", "image/png")
+            else:
+                # 前半
+                report1, d1, y1 = create_base_report(st.session_state['map_data'], " (前半)")
+                y1 = draw_report_content(d1, y1, ext_keys, report1)
+                final1 = report1.crop((0, 0, 1000, y1 + 50))
+                st.image(final1, use_container_width=True)
+                buf1 = io.BytesIO(); final1.save(buf1, format="PNG")
+                st.download_button("報告書(前半)を保存", buf1.getvalue(), "report_part1.png", "image/png")
+                # 後半
+                report2 = Image.new('RGB', (1000, 4000), color='white')
+                d2 = ImageDraw.Draw(report2)
+                d2.text((500, 80), f"{shop_name} 点検報告書 (後半)", fill="black", font=get_font(60), anchor="ms")
+                y2 = draw_report_content(d2, 150, int_food_keys, report2)
+                final2 = report2.crop((0, 0, 1000, y2 + 50))
+                st.image(final2, use_container_width=True)
+                buf2 = io.BytesIO(); final2.save(buf2, format="PNG")
+                st.download_button("報告書(後半)を保存", buf2.getvalue(), "report_part2.png", "image/png")
